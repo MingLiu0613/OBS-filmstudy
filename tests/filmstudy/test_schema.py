@@ -116,6 +116,54 @@ class SchemaContractTests(unittest.TestCase):
             [("analysis-1",)],
         )
 
+    def test_capture_identity_and_busy_guard(self):
+        self.db.execute(
+            "INSERT INTO games(id,name,created_at,updated_at) VALUES (?,?,?,?)",
+            ("game-1", "Example game", NOW, NOW),
+        )
+        self.db.execute(
+            "INSERT INTO capture_sessions(id,game_id,mode,state,source_snapshot_json,"
+            "created_at,updated_at) VALUES (?,?,'manual','starting','{}',?,?)",
+            ("session-1", "game-1", NOW, NOW),
+        )
+        self.db.execute(
+            "INSERT INTO clips(id,game_id,capture_mode,capture_state,created_at,updated_at) "
+            "VALUES (?,?,'manual','starting',?,?)",
+            ("clip-1", "game-1", NOW, NOW),
+        )
+        self.db.execute(
+            "INSERT INTO capture_operations(id,session_id,clip_id,phase,intended_final_relpath,"
+            "created_at,updated_at) VALUES (?,?,?,'starting',?,?,?)",
+            ("operation-1", "session-1", "clip-1", "media/clip-1.mp4", NOW, NOW),
+        )
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute(
+                "INSERT INTO capture_sessions(id,game_id,mode,state,source_snapshot_json,"
+                "created_at,updated_at) VALUES (?,?,'manual','starting','{}',?,?)",
+                ("session-2", "game-1", NOW, NOW),
+            )
+        self.db.execute("UPDATE capture_operations SET phase='failed' WHERE id='operation-1'")
+        self.db.execute("UPDATE capture_sessions SET state='failed' WHERE id='session-1'")
+        self.db.execute("UPDATE clips SET capture_state='failed' WHERE id='clip-1'")
+        self.db.execute(
+            "INSERT INTO capture_sessions(id,game_id,mode,state,source_snapshot_json,"
+            "created_at,updated_at) VALUES (?,?,'manual','starting','{}',?,?)",
+            ("session-2", "game-1", NOW, NOW),
+        )
+        self.assertEqual(
+            self.db.execute("SELECT id FROM clips WHERE game_id='game-1'").fetchall(),
+            [("clip-1",)],
+        )
+
+    def test_asset_content_is_immutable(self):
+        seed_ready_clip(self.db)
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute("UPDATE media_assets SET sha256=? WHERE id='asset-1'", ("b" * 64,))
+        self.assertEqual(
+            self.db.execute("SELECT sha256 FROM media_assets WHERE id='asset-1'").fetchone()[0],
+            "a" * 64,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

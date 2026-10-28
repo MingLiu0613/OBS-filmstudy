@@ -9,6 +9,7 @@
 #include <QUuid>
 
 #include <cstddef>
+#include <limits>
 
 using namespace FilmStudy;
 
@@ -27,7 +28,7 @@ bool SetError(QString *error, const QString &message)
 
 QString DbError(sqlite3 *database)
 {
-	return QString::fromUtf8(sqlite3_errmsg(database));
+	return QString::fromUtf8(database ? sqlite3_errmsg(database) : "SQLite could not allocate a connection");
 }
 } // namespace
 
@@ -98,6 +99,32 @@ bool Catalog::Exec(const QString &sql, QString *error)
 	return SetError(error, detail);
 }
 
+bool Catalog::ExecuteParams(const char *sql, const QStringList &values, QString *error)
+{
+	sqlite3_stmt *statement = nullptr;
+	if (sqlite3_prepare_v2(database, sql, -1, &statement, nullptr) != SQLITE_OK)
+		return SetError(error, DbError(database));
+	if (values.size() > std::numeric_limits<int>::max() ||
+	    sqlite3_bind_parameter_count(statement) != static_cast<int>(values.size())) {
+		sqlite3_finalize(statement);
+		return SetError(error, QStringLiteral("SQL parameter count mismatch"));
+	}
+	for (int index = 0; index < values.size(); ++index) {
+		const QByteArray bytes = values[index].toUtf8();
+		if (bytes.size() > std::numeric_limits<int>::max() ||
+		    sqlite3_bind_text(statement, index + 1, bytes.constData(), static_cast<int>(bytes.size()), SQLITE_TRANSIENT) !=
+		    SQLITE_OK) {
+			const QString detail = DbError(database);
+			sqlite3_finalize(statement);
+			return SetError(error, detail);
+		}
+	}
+	const int result = sqlite3_step(statement);
+	const QString detail = result == SQLITE_DONE ? QString() : DbError(database);
+	sqlite3_finalize(statement);
+	return detail.isEmpty() ? true : SetError(error, detail);
+}
+
 bool Catalog::QueryValue(const char *sql, QString *value, bool *hasRow, QString *error)
 {
 	sqlite3_stmt *statement = nullptr;
@@ -108,6 +135,31 @@ bool Catalog::QueryValue(const char *sql, QString *value, bool *hasRow, QString 
 	if (*hasRow && value) {
 		const auto *bytes = sqlite3_column_text(statement, 0);
 		*value = bytes ? QString::fromUtf8(reinterpret_cast<const char *>(bytes)) : QString();
+	}
+	const QString detail = result == SQLITE_ROW || result == SQLITE_DONE ? QString() : DbError(database);
+	sqlite3_finalize(statement);
+	return detail.isEmpty() ? true : SetError(error, detail);
+}
+
+bool Catalog::QueryBoundValue(const char *sql, const QString &parameter, QString *value, bool *hasRow,
+			      QString *error)
+{
+	sqlite3_stmt *statement = nullptr;
+	if (sqlite3_prepare_v2(database, sql, -1, &statement, nullptr) != SQLITE_OK)
+		return SetError(error, DbError(database));
+	const QByteArray bytes = parameter.toUtf8();
+	if (bytes.size() > std::numeric_limits<int>::max() ||
+	    sqlite3_bind_text(statement, 1, bytes.constData(), static_cast<int>(bytes.size()), SQLITE_TRANSIENT) !=
+		SQLITE_OK) {
+		const QString detail = DbError(database);
+		sqlite3_finalize(statement);
+		return SetError(error, detail);
+	}
+	const int result = sqlite3_step(statement);
+	*hasRow = result == SQLITE_ROW;
+	if (*hasRow && value) {
+		const auto *data = sqlite3_column_text(statement, 0);
+		*value = data ? QString::fromUtf8(reinterpret_cast<const char *>(data)) : QString();
 	}
 	const QString detail = result == SQLITE_ROW || result == SQLITE_DONE ? QString() : DbError(database);
 	sqlite3_finalize(statement);
@@ -199,4 +251,170 @@ QString Catalog::CatalogId() const
 						     &row, nullptr) && row)
 		return value;
 	return {};
+}
+
+bool Catalog::CreateGame(const QString &name, QString *gameId, QString *error)
+{
+	if (!database || name.trimmed().isEmpty())
+		return SetError(error, QStringLiteral("Open a catalog and provide a game name"));
+	const QString id = QUuid::createUuid().toString(QUuid::WithoutBraces).toLower();
+	const QString now = UtcNow();
+	if (!ExecuteParams("INSERT INTO games(id,name,created_at,updated_at) VALUES (?,?,?,?)",
+			   {id, name.trimmed(), now, now}, error))
+		return false;
+	if (gameId)
+		*gameId = id;
+	return true;
+}
+
+bool Catalog::BeginManualCapture(const QString &gameId, const QString &sourceSnapshotJson,
+				 ManualCaptureIds *ids, QString *error)
+{
+	if (!database || !ids)
+		return SetError(error, QStringLiteral("Open a catalog before capture"));
+	const QString sessionId = QUuid::createUuid().toString(QUuid::WithoutBraces).toLower();
+	const QString clipId = QUuid::createUuid().toString(QUuid::WithoutBraces).toLower();
+	const QString operationId = QUuid::createUuid().toString(QUuid::WithoutBraces).toLower();
+	const QString now = UtcNow();
+	const QString finalPath = QStringLiteral("media/%1.mp4").arg(clipId);
+	if (!Exec(QStringLiteral("BEGIN IMMEDIATE"), error))
+		return false;
+	const bool ok = ExecuteParams(
+			"INSERT INTO capture_sessions(id,game_id,mode,state,source_snapshot_json,created_at,updated_at) "
+			"VALUES (?,?,'manual','starting',?,?,?)",
+			{sessionId, gameId, sourceSnapshotJson, now, now}, error) &&
+		ExecuteParams("INSERT INTO clips(id,game_id,capture_mode,capture_state,created_at,updated_at) "
+			      "VALUES (?,?,'manual','starting',?,?)",
+			      {clipId, gameId, now, now}, error) &&
+		ExecuteParams("INSERT INTO capture_operations(id,session_id,clip_id,phase,intended_final_relpath,"
+			      "created_at,updated_at) VALUES (?,?,?,'starting',?,?,?)",
+			      {operationId, sessionId, clipId, finalPath, now, now}, error) &&
+		ExecuteParams("INSERT INTO operation_events(id,session_id,operation_id,dedupe_key,event_type,"
+			      "created_at) VALUES (?,?,?,'start-requested','start_requested',?)",
+			      {QUuid::createUuid().toString(QUuid::WithoutBraces).toLower(), sessionId, operationId, now},
+			      error);
+	if (!ok) {
+		Exec(QStringLiteral("ROLLBACK"), nullptr);
+		return false;
+	}
+	if (!Exec(QStringLiteral("COMMIT"), error)) {
+		Exec(QStringLiteral("ROLLBACK"), nullptr);
+		return false;
+	}
+	*ids = {clipId, sessionId, operationId};
+	return true;
+}
+
+bool Catalog::MarkRecording(const QString &operationId, QString *error)
+{
+	if (!database)
+		return SetError(error, QStringLiteral("Catalog is not open"));
+	if (!Exec(QStringLiteral("BEGIN IMMEDIATE"), error))
+		return false;
+	const QString now = UtcNow();
+	bool ok = ExecuteParams("UPDATE capture_operations SET phase='recording',updated_at=? "
+				"WHERE id=? AND phase='starting'",
+				{now, operationId}, error);
+	if (ok && sqlite3_changes(database) != 1)
+		ok = SetError(error, QStringLiteral("Operation is not starting"));
+	if (ok)
+		ok = ExecuteParams("UPDATE capture_sessions SET state='active',started_at=?,updated_at=? "
+				   "WHERE id=(SELECT session_id FROM capture_operations WHERE id=?)",
+				   {now, now, operationId}, error) &&
+		     ExecuteParams("UPDATE clips SET capture_state='recording',updated_at=? "
+				   "WHERE id=(SELECT clip_id FROM capture_operations WHERE id=?)",
+				   {now, operationId}, error);
+	if (ok)
+		ok = ExecuteParams("INSERT INTO operation_events(id,session_id,operation_id,dedupe_key,"
+				   "event_type,created_at) SELECT ?,session_id,id,'recording-started',"
+				   "'recording_started',? FROM capture_operations WHERE id=?",
+				   {QUuid::createUuid().toString(QUuid::WithoutBraces).toLower(), now, operationId},
+				   error);
+	if (!ok) {
+		Exec(QStringLiteral("ROLLBACK"), nullptr);
+		return false;
+	}
+	if (!Exec(QStringLiteral("COMMIT"), error)) {
+		Exec(QStringLiteral("ROLLBACK"), nullptr);
+		return false;
+	}
+	return true;
+}
+
+bool Catalog::RequestStop(const QString &operationId, QString *error)
+{
+	if (!database)
+		return SetError(error, QStringLiteral("Catalog is not open"));
+	QString phase;
+	bool row = false;
+	if (!QueryBoundValue("SELECT phase FROM capture_operations WHERE id=?", operationId, &phase, &row,
+			     error) || !row)
+		return SetError(error, QStringLiteral("Unknown capture operation"));
+	if (phase == QStringLiteral("saving") || phase == QStringLiteral("processing"))
+		return true;
+	if (phase != QStringLiteral("recording"))
+		return SetError(error, QStringLiteral("Operation is not recording"));
+	if (!Exec(QStringLiteral("BEGIN IMMEDIATE"), error))
+		return false;
+	const QString now = UtcNow();
+	bool ok = ExecuteParams("UPDATE capture_operations SET phase='saving',updated_at=? "
+				"WHERE id=? AND phase='recording'",
+				{now, operationId}, error);
+	if (ok && sqlite3_changes(database) != 1)
+		ok = SetError(error, QStringLiteral("Operation state changed during stop"));
+	if (ok)
+		ok = ExecuteParams("UPDATE capture_sessions SET state='stopping',updated_at=? "
+				   "WHERE id=(SELECT session_id FROM capture_operations WHERE id=?)",
+				   {now, operationId}, error) &&
+		     ExecuteParams("UPDATE clips SET capture_state='saving',updated_at=? "
+				   "WHERE id=(SELECT clip_id FROM capture_operations WHERE id=?)",
+				   {now, operationId}, error);
+	if (!ok) {
+		Exec(QStringLiteral("ROLLBACK"), nullptr);
+		return false;
+	}
+	if (!Exec(QStringLiteral("COMMIT"), error)) {
+		Exec(QStringLiteral("ROLLBACK"), nullptr);
+		return false;
+	}
+	return true;
+}
+
+bool Catalog::MarkFailed(const QString &operationId, const QString &code, const QString &message,
+			 QString *error)
+{
+	if (!database || code.isEmpty())
+		return SetError(error, QStringLiteral("Open a catalog and provide a failure code"));
+	if (!Exec(QStringLiteral("BEGIN IMMEDIATE"), error))
+		return false;
+	const QString now = UtcNow();
+	bool ok = ExecuteParams("UPDATE capture_operations SET phase='failed',error_code=?,error_message=?,"
+				"updated_at=? WHERE id=? AND phase IN ('created','starting','recording','saving',"
+				"'processing')",
+				{code, message, now, operationId}, error);
+	if (ok && sqlite3_changes(database) != 1)
+		ok = SetError(error, QStringLiteral("Operation cannot become failed"));
+	if (ok)
+		ok = ExecuteParams("UPDATE capture_sessions SET state='failed',stopped_at=?,updated_at=? "
+				   "WHERE id=(SELECT session_id FROM capture_operations WHERE id=?)",
+				   {now, now, operationId}, error) &&
+		     ExecuteParams("UPDATE clips SET capture_state='failed',updated_at=? "
+				   "WHERE id=(SELECT clip_id FROM capture_operations WHERE id=?)",
+				   {now, operationId}, error);
+	if (ok)
+		ok = ExecuteParams("INSERT INTO operation_events(id,session_id,operation_id,dedupe_key,"
+				   "event_type,payload_json,created_at) SELECT ?,session_id,id,'capture-failed',"
+				   "'capture_failed',json_object('code',?),? FROM capture_operations WHERE id=?",
+				   {QUuid::createUuid().toString(QUuid::WithoutBraces).toLower(), code, now,
+				    operationId},
+				   error);
+	if (!ok) {
+		Exec(QStringLiteral("ROLLBACK"), nullptr);
+		return false;
+	}
+	if (!Exec(QStringLiteral("COMMIT"), error)) {
+		Exec(QStringLiteral("ROLLBACK"), nullptr);
+		return false;
+	}
+	return true;
 }
