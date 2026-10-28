@@ -1,0 +1,63 @@
+name: Film Study build and data checks
+
+on:
+  push:
+    branches:
+      - filmstudy/main
+      - 'feat/filmstudy-*'
+      - 'fix/filmstudy-*'
+  pull_request:
+    branches:
+      - filmstudy/main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  data-contract:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Record source and runner
+        run: |
+          echo "ref=${GITHUB_REF} sha=${GITHUB_SHA}"
+          uname -a
+          python3 -c 'import sqlite3; print("SQLite", sqlite3.sqlite_version)'
+      - name: Check Film Study schema
+        run: python3 tests/filmstudy/test_schema.py
+
+  windows-x64:
+    runs-on: windows-2025-vs2026
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          submodules: recursive
+          fetch-depth: 0
+      - name: Record source and native architecture
+        shell: pwsh
+        run: |
+          Write-Output "ref=$env:GITHUB_REF sha=$env:GITHUB_SHA"
+          Write-Output "runner.os=$env:RUNNER_OS native_arch=$env:PROCESSOR_ARCHITECTURE"
+          if ($env:PROCESSOR_ARCHITECTURE -ne 'AMD64') { throw 'Expected native Windows x64 runner' }
+      - name: Build without signing or publishing
+        shell: pwsh
+        run: .github/scripts/Build-Windows.ps1 -Target x64 -Configuration RelWithDebInfo
+
+  macos-arm64:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          submodules: recursive
+          fetch-depth: 0
+      - name: Record source and require native arm64
+        shell: zsh {0}
+        run: |
+          print "ref=${GITHUB_REF} sha=${GITHUB_SHA}"
+          print "runner.os=${RUNNER_OS} native_arch=$(uname -m)"
+          [[ $(uname -m) == arm64 ]] || { print -u2 'Expected native macOS arm64 runner'; exit 1; }
+          sudo xcode-select --switch /Applications/Xcode_26.5.app/Contents/Developer
+      - name: Build without signing or publishing
+        shell: zsh --no-rcs --errexit --pipefail {0}
+        run: .github/scripts/build-macos --config RelWithDebInfo --target macos-arm64
