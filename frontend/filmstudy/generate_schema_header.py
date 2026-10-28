@@ -24,7 +24,9 @@ def statements(sql):
 
 
 def main():
-    source_bytes = SOURCE.read_bytes()
+    # Git may check out CRLF on Windows and LF on CI/macOS. The migration
+    # identity is the canonical LF source, not a host-specific checkout.
+    source_bytes = SOURCE.read_bytes().replace(b"\r\n", b"\n")
     sql = source_bytes.decode("utf-8")
     parts = list(statements(sql))
     if len(parts) < 40:

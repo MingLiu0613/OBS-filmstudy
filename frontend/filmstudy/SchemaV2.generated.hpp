@@ -2,7 +2,7 @@
 #pragma once
 #include <array>
 #include <string_view>
-inline constexpr std::string_view filmStudySchemaV2Sha256 = "fcce89c981273fdcc71737537e570c1e99bd68bea2918bf1124e4d135b7b02ab";
+inline constexpr std::string_view filmStudySchemaV2Sha256 = "33dfaf8a0c006b532314824b282452266f45834739c2200a36c922eb96ede387";
 inline constexpr std::array<std::string_view, 75> filmStudySchemaV2 = {
     R"FILMSTUDY(-- Basketball Film Study OBS schema 2
 -- Connection setup must run before migration BEGIN.
