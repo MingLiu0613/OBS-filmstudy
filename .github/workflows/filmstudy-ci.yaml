@@ -25,7 +25,10 @@ jobs:
           uname -a
           python3 -c 'import sqlite3; print("SQLite", sqlite3.sqlite_version)'
       - name: Check Film Study schema
-        run: python3 tests/filmstudy/test_schema.py
+        run: |
+          python3 tests/filmstudy/test_schema.py
+          python3 frontend/filmstudy/generate_schema_header.py
+          git diff --exit-code -- frontend/filmstudy/SchemaV2.generated.hpp
 
   windows-x64:
     runs-on: windows-2025-vs2026
@@ -46,6 +49,9 @@ jobs:
 
   macos-arm64:
     runs-on: macos-26
+    env:
+      # Xcode 26 runner CAS occasionally points at a missing root during the first build.
+      COMPILATION_CACHE_ENABLE: 'NO'
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
