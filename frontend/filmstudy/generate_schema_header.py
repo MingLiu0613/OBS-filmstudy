@@ -16,7 +16,7 @@ def statements(sql):
         pending += line
         if sqlite3.complete_statement(pending):
             statement = pending.strip()
-            if statement and not statement.startswith("-- Connection setup"):
+            if statement:
                 yield statement
             pending = ""
     if pending.strip():
@@ -31,6 +31,8 @@ def main():
     parts = list(statements(sql))
     if len(parts) < 40:
         raise ValueError("Schema appears truncated")
+    if not parts[0].endswith("PRAGMA foreign_keys = ON;"):
+        raise ValueError("The first statement must enable foreign keys before BEGIN")
     generated = [
         "// Generated from migrations/0002_initial.sql; do not edit by hand.\n",
         "#pragma once\n",

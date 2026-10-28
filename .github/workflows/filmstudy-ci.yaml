@@ -4,8 +4,6 @@ on:
   push:
     branches:
       - filmstudy/main
-      - 'feat/filmstudy-*'
-      - 'fix/filmstudy-*'
   pull_request:
     branches:
       - filmstudy/main
@@ -15,7 +13,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: filmstudy-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: filmstudy-${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 
 jobs:
@@ -33,6 +31,10 @@ jobs:
           python3 tests/filmstudy/test_schema.py
           python3 frontend/filmstudy/generate_schema_header.py
           git diff --exit-code -- frontend/filmstudy/SchemaV2.generated.hpp
+      - name: Check export JSON format
+        run: |
+          python3 -m pip install --disable-pip-version-check -r tests/filmstudy/requirements.txt
+          python3 tests/filmstudy/test_manifest_schema.py
 
   windows-x64:
     runs-on: windows-2025-vs2026

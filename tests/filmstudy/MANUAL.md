@@ -1,0 +1,12 @@
+# Film Study native acceptance steps
+
+These steps become executable after the OBS integration and UI exist. Until then, `@todo` in the feature file marks the missing application coverage. Do not count a schema test or successful build as an application pass.
+
+1. On a native Windows x64 or macOS arm64 host, create a new catalog and name a game. Set a real capture source and MP4 output, then record at least ten seconds of nonprivate test footage. Observe that no Film Study window appears or gains focus while recording.
+2. Stop and wait for output completion. Verify one stable Clip ID, a readable MP4 with audio, and a preview that opens inside the application only after the Clip is ready.
+3. Add two complete analyses with different perspectives and topics. Start another recording under the same game and verify its analysis list is empty while the first clip's analyses remain.
+4. Filter by a perspective from one analysis and a topic from the other; expect no result. Filter by the perspective and topic on the same analysis; expect one Clip with that analysis ID. Repeat for the other analysis.
+5. Export. Verify one byte-identical MP4 per Clip and one UTF-8 `manifest.json` with every analysis and only the matched IDs in `matched_analysis_ids`. Move the package and verify the relative media path still works. Edit an analysis afterward and confirm the old manifest does not change.
+6. Trigger duplicate stop; expect one operation. Simulate a failed output in a disposable catalog; expect the original Clip ID and diagnostic to remain, and a later Clip to get a new ID under the same game.
+
+Record platform, native CPU architecture, commit SHA, OBS startup result, actual capture result, sample properties, and failures in `docs/filmstudy/STATUS.md`. Never commit the footage or user catalog.

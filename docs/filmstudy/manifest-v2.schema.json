@@ -1,0 +1,143 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/MingLiu0613/OBS-filmstudy/blob/filmstudy/main/docs/filmstudy/manifest-v2.schema.json",
+  "title": "Basketball Film Study export manifest version 2",
+  "type": "object",
+  "required": ["schema_version", "export_id", "exported_at", "application", "query", "clip_count", "analysis_count", "clips", "catalog_id", "snapshot_catalog_revision"],
+  "properties": {
+    "schema_version": {"const": 2},
+    "export_id": {"$ref": "#/$defs/id"},
+    "exported_at": {"$ref": "#/$defs/utc"},
+    "application": {
+      "type": "object",
+      "required": ["name", "version", "upstream_tag", "upstream_commit"],
+      "properties": {
+        "name": {"const": "Basketball Film Study OBS"},
+        "version": {"type": "string", "minLength": 1},
+        "upstream_tag": {"type": "string", "minLength": 1},
+        "upstream_commit": {"type": "string", "minLength": 1}
+      }
+    },
+    "query": {
+      "type": "object",
+      "required": ["logic_version", "mode"],
+      "properties": {
+        "logic_version": {"const": 1},
+        "mode": {"type": "string", "minLength": 1},
+        "perspectives": {"type": "array", "items": {"enum": ["offense", "defense"]}, "uniqueItems": true},
+        "topic_ids": {"$ref": "#/$defs/idList"},
+        "assessments": {"type": "array", "items": {"enum": ["positive", "negative"]}, "uniqueItems": true},
+        "player_ids": {"$ref": "#/$defs/idList"},
+        "player_match": {"enum": ["any", "all"]},
+        "result_ids": {"$ref": "#/$defs/idList"},
+        "game_ids": {"$ref": "#/$defs/idList"},
+        "keyword": {"type": "string"}
+      }
+    },
+    "clip_count": {"type": "integer", "minimum": 1},
+    "analysis_count": {"type": "integer", "minimum": 0},
+    "clips": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/clip"}},
+    "catalog_id": {"$ref": "#/$defs/id"},
+    "snapshot_catalog_revision": {"type": "integer", "minimum": 0}
+  },
+  "$defs": {
+    "id": {"type": "string", "minLength": 1},
+    "idList": {"type": "array", "items": {"$ref": "#/$defs/id"}, "uniqueItems": true},
+    "utc": {"type": "string", "format": "date-time", "pattern": "Z$"},
+    "nullableText": {"type": ["string", "null"]},
+    "label": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {"name": {"type": "string"}}
+    },
+    "clip": {
+      "type": "object",
+      "required": ["clip_id", "revision", "title", "capture_mode", "created_at", "file", "game", "source", "period", "game_clock", "game_clock_ms", "matched_analysis_ids", "analyses"],
+      "properties": {
+        "clip_id": {"$ref": "#/$defs/id"},
+        "revision": {"type": "integer", "minimum": 1},
+        "title": {"type": "string"},
+        "capture_mode": {"enum": ["manual", "replay"]},
+        "created_at": {"$ref": "#/$defs/utc"},
+        "file": {
+          "type": "object",
+          "required": ["asset_id", "path", "size_bytes", "sha256", "duration_ms", "video_codec", "audio_codec"],
+          "properties": {
+            "asset_id": {"$ref": "#/$defs/id"},
+            "path": {"type": "string", "pattern": "^media/[^/\\\\:]+\\.mp4$"},
+            "size_bytes": {"type": "integer", "minimum": 1},
+            "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "duration_ms": {"type": "integer", "minimum": 1},
+            "video_codec": {"type": "string", "minLength": 1},
+            "audio_codec": {"$ref": "#/$defs/nullableText"}
+          }
+        },
+        "game": {
+          "type": "object",
+          "required": ["game_id", "name", "game_date", "season", "home_team", "away_team"],
+          "properties": {
+            "game_id": {"$ref": "#/$defs/id"},
+            "name": {"type": "string", "minLength": 1},
+            "game_date": {"$ref": "#/$defs/nullableText"},
+            "season": {"$ref": "#/$defs/nullableText"},
+            "home_team": {"$ref": "#/$defs/nullableText"},
+            "away_team": {"$ref": "#/$defs/nullableText"}
+          }
+        },
+        "source": {
+          "type": "object",
+          "required": ["name", "url", "note"],
+          "properties": {
+            "name": {"$ref": "#/$defs/nullableText"},
+            "url": {"$ref": "#/$defs/nullableText"},
+            "note": {"type": "string"}
+          }
+        },
+        "period": {"$ref": "#/$defs/nullableText"},
+        "game_clock": {"$ref": "#/$defs/nullableText"},
+        "game_clock_ms": {"type": ["integer", "null"], "minimum": 0},
+        "matched_analysis_ids": {"$ref": "#/$defs/idList"},
+        "analyses": {"type": "array", "items": {"$ref": "#/$defs/analysis"}}
+      }
+    },
+    "analysis": {
+      "type": "object",
+      "required": ["analysis_id", "revision", "status", "perspective", "topic", "assessment", "players", "actual_result", "note", "created_at", "updated_at", "reference_asset_id", "range"],
+      "properties": {
+        "analysis_id": {"$ref": "#/$defs/id"},
+        "revision": {"type": "integer", "minimum": 1},
+        "status": {"enum": ["draft", "complete"]},
+        "perspective": {"enum": ["offense", "defense", null]},
+        "topic": {"anyOf": [{"$ref": "#/$defs/topic"}, {"type": "null"}]},
+        "assessment": {"enum": ["positive", "negative", null]},
+        "players": {"type": "array", "items": {"$ref": "#/$defs/player"}},
+        "actual_result": {"anyOf": [{"$ref": "#/$defs/result"}, {"type": "null"}]},
+        "note": {"type": "string"},
+        "created_at": {"$ref": "#/$defs/utc"},
+        "updated_at": {"$ref": "#/$defs/utc"},
+        "reference_asset_id": {"$ref": "#/$defs/id"},
+        "range": {
+          "anyOf": [
+            {"type": "null"},
+            {"type": "object", "required": ["start_ms", "end_ms"], "properties": {"start_ms": {"type": "integer", "minimum": 0}, "end_ms": {"type": "integer", "minimum": 1}}}
+          ]
+        }
+      },
+      "allOf": [
+        {"if": {"properties": {"status": {"const": "complete"}}}, "then": {"properties": {"perspective": {"enum": ["offense", "defense"]}, "topic": {"$ref": "#/$defs/topic"}, "assessment": {"enum": ["positive", "negative"]}}}}
+      ]
+    },
+    "topic": {"type": "object", "required": ["topic_id", "name"], "properties": {"topic_id": {"$ref": "#/$defs/id"}, "name": {"type": "string", "minLength": 1}}},
+    "result": {"type": "object", "required": ["result_id", "name"], "properties": {"result_id": {"$ref": "#/$defs/id"}, "name": {"type": "string", "minLength": 1}}},
+    "player": {
+      "type": "object",
+      "required": ["player_id", "name", "aliases", "role"],
+      "properties": {
+        "player_id": {"$ref": "#/$defs/id"},
+        "name": {"type": "string", "minLength": 1},
+        "aliases": {"type": "array", "items": {"type": "string"}},
+        "role": {"enum": ["focus", "context"]}
+      }
+    }
+  }
+}

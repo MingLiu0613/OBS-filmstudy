@@ -1,0 +1,122 @@
+{
+  "schema_version": 2,
+  "export_id": "example-export-id",
+  "exported_at": "2026-10-27T12:30:00Z",
+  "application": {
+    "name": "Basketball Film Study OBS",
+    "version": "0.1.0",
+    "upstream_tag": "locked-at-build",
+    "upstream_commit": "locked-at-build"
+  },
+  "query": {
+    "logic_version": 1,
+    "mode": "analysed",
+    "perspectives": [
+      "offense"
+    ],
+    "topic_ids": [
+      "T01"
+    ],
+    "assessments": [
+      "positive"
+    ],
+    "player_ids": [
+      "P01"
+    ],
+    "player_match": "any",
+    "result_ids": [],
+    "game_ids": [],
+    "keyword": ""
+  },
+  "clip_count": 1,
+  "analysis_count": 2,
+  "clips": [
+    {
+      "clip_id": "C001",
+      "revision": 3,
+      "title": "主动接触后完成终结",
+      "capture_mode": "manual",
+      "created_at": "2026-10-27T12:00:00Z",
+      "file": {
+        "path": "media/C001.mp4",
+        "size_bytes": 10000000,
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "duration_ms": 28000,
+        "video_codec": "h264",
+        "audio_codec": "aac",
+        "asset_id": "M001"
+      },
+      "game": {
+        "game_id": "G001",
+        "name": "示例比赛",
+        "game_date": null,
+        "season": null,
+        "home_team": null,
+        "away_team": null
+      },
+      "source": {
+        "name": "用户填写的来源",
+        "url": null,
+        "note": ""
+      },
+      "period": "Q3",
+      "game_clock": "08:42",
+      "matched_analysis_ids": [
+        "A01"
+      ],
+      "analyses": [
+        {
+          "analysis_id": "A01",
+          "revision": 1,
+          "status": "complete",
+          "perspective": "offense",
+          "topic": {
+            "topic_id": "T01",
+            "name": "身体接触时机"
+          },
+          "assessment": "positive",
+          "players": [
+            {
+              "player_id": "P01",
+              "name": "SGA",
+              "aliases": [
+                "Shai Gilgeous-Alexander"
+              ],
+              "role": "focus"
+            }
+          ],
+          "actual_result": {
+            "result_id": "R01",
+            "name": "命中"
+          },
+          "note": "分析主动接触的时机与空间变化",
+          "created_at": "2026-10-27T12:01:00Z",
+          "updated_at": "2026-10-27T12:02:00Z",
+          "reference_asset_id": "M001",
+          "range": null
+        },
+        {
+          "analysis_id": "A02",
+          "revision": 1,
+          "status": "complete",
+          "perspective": "defense",
+          "topic": {
+            "topic_id": "T02",
+            "name": "退防路线"
+          },
+          "assessment": "negative",
+          "players": [],
+          "actual_result": null,
+          "note": "防守侧的独立分析",
+          "created_at": "2026-10-27T12:03:00Z",
+          "updated_at": "2026-10-27T12:03:00Z",
+          "reference_asset_id": "M001",
+          "range": null
+        }
+      ],
+      "game_clock_ms": 522000
+    }
+  ],
+  "catalog_id": "example-catalog-id",
+  "snapshot_catalog_revision": 12
+}

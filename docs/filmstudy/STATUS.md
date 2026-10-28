@@ -7,6 +7,7 @@ Updated: 2026-10-28. Source of truth for scope: [PRD](PRD.md).
 | M0 upstream baseline | complete locally | OBS 33.0.0 peeled to the required commit; recorded submodules initialized |
 | M0 product branch and docs | complete on task branch | `filmstudy/main` and `feat/filmstudy-foundation` are on origin; Draft PR #1 targets the product branch |
 | M0 schema contract | partial | Appendix A SQL, native SQLite schema 2 opener and manual capture state API are in the module; 5 Python checks pass; C++ smoke, v1 migration and full services remain |
+| M0 JSON format 2 | partial | Schema and PRD example fixture added; 3 local schema checks pass; exporter and cross-field integrity checks remain |
 | M0 CI | running | Data job passes with canonical migration hash. macOS reached SQLite compilation after disabling Xcode cache, then stopped on third-party warnings treated as errors; target-scoped mitigation awaits CI |
 | M0 Windows x64 build | failed in CI | Native x64 runner confirmed; CMake could not find Qt6Sql in the locked Qt bundle. Local host has no CMake or Visual Studio |
 | M0 macOS arm64 build | failed in CI | Native arm64 runner confirmed; first run hit Xcode CAS root error, next CMake run could not find Qt6Sql. Both mitigations await CI |
