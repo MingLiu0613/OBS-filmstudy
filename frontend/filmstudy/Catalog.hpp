@@ -1,11 +1,11 @@
 #pragma once
 
-#include <QSqlDatabase>
 #include <QString>
 
 #include <memory>
 
 class QLockFile;
+struct sqlite3;
 
 namespace FilmStudy {
 
@@ -20,17 +20,17 @@ public:
 
 	bool Open(const QString &rootDirectory, QString *error);
 	void Close();
-	bool IsOpen() const { return database.isOpen(); }
+	bool IsOpen() const { return database != nullptr; }
 	QString CatalogId() const;
 
 private:
 	bool Initialize(QString *error);
 	bool CheckExisting(QString *error);
 	bool Exec(const QString &sql, QString *error);
+	bool QueryValue(const char *sql, QString *value, bool *hasRow, QString *error);
 	bool CapabilityCheck(QString *error);
 
-	QString connectionName;
-	QSqlDatabase database;
+	sqlite3 *database = nullptr;
 	std::unique_ptr<QLockFile> lock;
 };
 

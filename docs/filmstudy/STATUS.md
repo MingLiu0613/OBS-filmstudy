@@ -6,10 +6,10 @@ Updated: 2026-10-28. Source of truth for scope: [PRD](PRD.md).
 | --- | --- | --- |
 | M0 upstream baseline | complete locally | OBS 33.0.0 peeled to the required commit; recorded submodules initialized |
 | M0 product branch and docs | complete on task branch | `filmstudy/main` and `feat/filmstudy-foundation` are on origin; Draft PR #1 targets the product branch |
-| M0 schema contract | partial | Appendix A SQL and a QtSql schema 2 opener are in the module; 3 Python checks pass; C++ build, v1 migration and catalog service tests remain |
-| M0 CI | running | Data job passed; Windows x64 build still running; macOS arm64 failed with Xcode CAS root error and a no-cache retry is prepared |
-| M0 Windows x64 build | not run | This Windows host has no CMake or Visual Studio toolchain detected |
-| M0 macOS arm64 build | failed in CI | Native arm64 runner confirmed; Xcode 26.5 compiler reported `CAS filesystem ... RootID does not exist` |
+| M0 schema contract | partial | Appendix A SQL and a native SQLite schema 2 opener are in the module; 3 Python checks pass; C++ build, v1 migration and catalog service tests remain |
+| M0 CI | running | Data job passed before generator was added; a CRLF hash fix is pushed. Both native builds found the locked Qt bundle lacks Qt6Sql; the catalog now uses pinned SQLite 3.46.1, awaiting CI |
+| M0 Windows x64 build | failed in CI | Native x64 runner confirmed; CMake could not find Qt6Sql in the locked Qt bundle. Local host has no CMake or Visual Studio |
+| M0 macOS arm64 build | failed in CI | Native arm64 runner confirmed; first run hit Xcode CAS root error, next CMake run could not find Qt6Sql. Both mitigations await CI |
 | M1 capture to MP4 | not implemented | OBS integration pending |
 | M1 preview, two analyses, query, export | not implemented | Product services and UI pending |
 | M2 remaining P0 | not implemented | See PRD section 4 and section 17 |

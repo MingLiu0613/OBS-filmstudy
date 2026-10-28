@@ -23,3 +23,15 @@
 - Root cause: Windows checked out the SQL with CRLF, while the Linux runner used LF; the generator hashed raw checkout bytes.
 - Fix: Normalize CRLF to LF before hashing and generating the embedded SQL.
 - Prevention: Define a canonical byte representation for persisted migration identity and verify generated files on CI after cross-platform checkout.
+
+## LESSON-20261028-qt-sql: Check the locked Qt bundle before choosing an add-on module
+
+- Date: 2026-10-28
+- Tags: obs, qt, dependencies, ci
+- Applicable scenarios: Adding an optional Qt module to OBS 33.0.0's prebuilt dependency bundle.
+- Severity: medium
+- Source: Film Study CI run `40653155498`, both native build jobs.
+- Problem: CMake could not find `Qt6Sql` on either target platform.
+- Root cause: The OBS 33.0.0 pinned Qt bundle includes only the Qt modules OBS needs; Qt6Sql was not packaged.
+- Fix: Use a pinned official SQLite amalgamation for the catalog and keep Qt Core for paths, dates and locking.
+- Prevention: Inspect or build against the exact pinned dependency bundle before relying on optional modules; do not assume that every Qt component is present.

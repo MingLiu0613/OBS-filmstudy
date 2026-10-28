@@ -18,3 +18,5 @@ Recorded direct submodule commits:
 Run `git submodule update --init --recursive`, without `--remote`. The root `CMakePresets.json` requires CMake 3.28 or newer and records the 2026-10-23 OBS prebuilt dependency and Qt 6 bundles and CEF 7871. Its Windows x64 preset targets Visual Studio and SDK 10.0.26100; the release notes specify Visual Studio 2026. The macOS preset uses Xcode and a macOS 13.0 deployment target. Keep dependency hashes and platform build directories from this exact commit.
 
 The product branch does not follow upstream `master`. A future upstream upgrade requires a separate reviewed decision and migration assessment.
+
+Film Study pins an additional SQLite 3.46.1 amalgamation in `frontend/filmstudy/third_party/sqlite/`; see its README and [decision 0002](decisions/0002-sqlite-dependency.md). The locked OBS Qt bundle omits Qt6Sql on both target platforms. This does not alter the upstream OBS dependency hashes.
