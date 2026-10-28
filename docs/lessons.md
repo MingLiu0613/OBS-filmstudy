@@ -35,3 +35,15 @@
 - Root cause: The OBS 33.0.0 pinned Qt bundle includes only the Qt modules OBS needs; Qt6Sql was not packaged.
 - Fix: Use a pinned official SQLite amalgamation for the catalog and keep Qt Core for paths, dates and locking.
 - Prevention: Inspect or build against the exact pinned dependency bundle before relying on optional modules; do not assume that every Qt component is present.
+
+## LESSON-20261028-unique-ptr-type: Inline constructors need complete owned types
+
+- Date: 2026-10-28
+- Tags: cpp, qt, compile, macos
+- Applicable scenarios: A public C++ header uses `std::unique_ptr<T>` and defaults its constructor inline.
+- Severity: low
+- Source: Film Study macOS CI catalog smoke, run `40655054110`.
+- Problem: A second translation unit including `Catalog.hpp` failed with `invalid application of 'sizeof' to an incomplete type 'QLockFile'`.
+- Root cause: The inline default constructor instantiates cleanup for exception paths, so `unique_ptr<QLockFile>` requires the complete `QLockFile` definition in that header.
+- Fix: Include `<QLockFile>` in `Catalog.hpp` rather than only forward declaring it.
+- Prevention: Compile a separate consumer translation unit for public headers, not only the implementation file that includes complete types.

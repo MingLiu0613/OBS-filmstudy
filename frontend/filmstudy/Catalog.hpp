@@ -2,10 +2,10 @@
 
 #include <QString>
 #include <QStringList>
+#include <QLockFile>
 
 #include <memory>
 
-class QLockFile;
 struct sqlite3;
 
 namespace FilmStudy {
