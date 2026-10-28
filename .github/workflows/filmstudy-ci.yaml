@@ -14,6 +14,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: filmstudy-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   data-contract:
     runs-on: ubuntu-26.04
@@ -46,12 +50,14 @@ jobs:
       - name: Build without signing or publishing
         shell: pwsh
         run: .github/scripts/Build-Windows.ps1 -Target x64 -Configuration RelWithDebInfo
+      - name: Run catalog bootstrap smoke
+        shell: pwsh
+        run: |
+          cmake --build build_x64 --config RelWithDebInfo --target filmstudy-catalog-smoke
+          & build_x64/frontend/filmstudy/RelWithDebInfo/filmstudy-catalog-smoke.exe
 
   macos-arm64:
     runs-on: macos-26
-    env:
-      # Xcode 26 runner CAS occasionally points at a missing root during the first build.
-      COMPILATION_CACHE_ENABLE: 'NO'
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -67,3 +73,8 @@ jobs:
       - name: Build without signing or publishing
         shell: zsh --no-rcs --errexit --pipefail {0}
         run: .github/scripts/build-macos --config RelWithDebInfo --target macos-arm64
+      - name: Run catalog bootstrap smoke
+        shell: zsh --no-rcs --errexit --pipefail {0}
+        run: |
+          cmake --build build_macos --config RelWithDebInfo --target filmstudy-catalog-smoke
+          build_macos/frontend/filmstudy/RelWithDebInfo/filmstudy-catalog-smoke

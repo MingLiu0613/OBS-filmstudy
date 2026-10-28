@@ -13,7 +13,7 @@
 
 ## Build and validation
 
-Use the locked root `CMakePresets.json` and upstream build scripts as the source of tool versions. Windows CI uses `.github/scripts/Build-Windows.ps1 -Target x64`; macOS CI uses `.github/scripts/build-macos --config RelWithDebInfo --target macos-arm64`. Local builds may use matching `cmake --preset windows-x64` / `cmake --preset macos` and `cmake --build` commands after dependencies are installed. Run `python tests/filmstudy/test_schema.py` for the data contract. Record build, app startup, and real capture as independent results. CI must print `runner.os` and native CPU architecture.
+Use the locked root `CMakePresets.json` and upstream build scripts as the source of tool versions. Windows CI uses `.github/scripts/Build-Windows.ps1 -Target x64`; macOS CI uses `.github/scripts/build-macos --config RelWithDebInfo --target macos-arm64`. Local builds may use matching `cmake --preset windows-x64` / `cmake --preset macos` and `cmake --build` commands after dependencies are installed. Run `python tests/filmstudy/test_schema.py` for the data contract. Build and run `filmstudy-catalog-smoke` to verify catalog creation, single-writer locking and reopening on each native runner. The macOS CI preset disables Xcode's compilation cache after a runner CAS root failure; this changes no release tool version. Record build, app startup, and real capture as independent results. CI must print `runner.os` and native CPU architecture.
 
 ## Finish or switch computers
 
