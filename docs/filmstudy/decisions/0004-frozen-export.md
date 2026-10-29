@@ -1,0 +1,9 @@
+# 0004: Freeze metadata before copying export media
+
+Status: accepted for the first export flow; recovery and cancellation remain P0 work.
+
+The catalog's SQLite database owns the current Clip, Asset, Location and Analysis state. A JSON export is a snapshot, not an editable copy of that state. For a version 1 same-Analysis query, `Catalog::ExportMatching` first checks the source files and destination capacity. A short `BEGIN IMMEDIATE` transaction resolves the matching Analysis IDs and all undeleted analyses for each matching Clip, stores `export_jobs`, `export_items`, and `export_item_matches`, serializes the complete format 2 manifest, and sets `snapshot_frozen_at`. No media is copied while that transaction is open.
+
+The frozen manifest contains the names and revisions observed in that transaction. The file phase copies each entire original MP4 to a same-volume staging directory, checks its immutable size and SHA-256, writes the exact UTF-8 manifest bytes, and renames the directory before marking the job successful. A failed job and its frozen record remain available for diagnosis. A future retry must read `manifest_snapshot_json` and the frozen item identities; it must not join current analyses or replace the expected asset hash. If the final directory was published but the success update failed, recovery must inspect the job ID, final directory and stored hashes before changing state.
+
+The first UI offers perspective and topic filters only. Progress, cancellation, interrupted job recovery, and the remaining PRD P0 query dimensions are not yet implemented. The current call runs on the UI thread and can block for a large copy; move the file phase to a worker before claiming P0 export acceptance. The catalog smoke uses synthetic media bytes and cannot establish real MP4 playback or capture correctness.

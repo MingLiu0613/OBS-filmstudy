@@ -10,9 +10,11 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSaveFile>
+#include <QStorageInfo>
 #include <QUuid>
 #include <QVariant>
 
+#include <limits>
 #include <memory>
 
 using namespace FilmStudy;
@@ -55,6 +57,22 @@ bool Fail(QString *error, const QString &message)
 	if (error)
 		*error = message;
 	return false;
+}
+
+constexpr Qt::CaseSensitivity PathCaseSensitivity()
+{
+#ifdef Q_OS_WIN
+	return Qt::CaseInsensitive;
+#else
+	return Qt::CaseSensitive;
+#endif
+}
+
+bool IsWithin(const QString &path, const QString &directory)
+{
+	const QString normalizedPath = QDir::fromNativeSeparators(path);
+	const QString normalizedDirectory = QDir::fromNativeSeparators(directory);
+	return normalizedPath.startsWith(normalizedDirectory + QLatin1Char('/'), PathCaseSensitivity());
 }
 
 QString UtcNow()
@@ -124,9 +142,27 @@ bool Catalog::ExportMatching(const QString &perspective, const QString &topicId,
 	const QString catalogCanonical = QFileInfo(rootDirectory).canonicalFilePath();
 	const QString destinationCanonical = QFileInfo(destination).canonicalFilePath();
 	if (catalogCanonical.isEmpty() || destinationCanonical.isEmpty() ||
-	    destinationCanonical == catalogCanonical ||
-	    destinationCanonical.startsWith(catalogCanonical + QDir::separator()))
+	    QDir::fromNativeSeparators(destinationCanonical).compare(
+		QDir::fromNativeSeparators(catalogCanonical), PathCaseSensitivity()) == 0 ||
+	    IsWithin(destinationCanonical, catalogCanonical))
 		return Fail(error, QStringLiteral("Export destination must be outside the catalog"));
+	QList<ClipMatch> preflight;
+	if (!SearchComplete(perspective, topicId, assessment, &preflight, error))
+		return false;
+	if (preflight.isEmpty())
+		return Fail(error, QStringLiteral("No ready analysed clips match this export query"));
+	qint64 requiredBytes = 0;
+	for (const ClipMatch &match : preflight) {
+		const QFileInfo source(QDir(rootDirectory).filePath(match.relativePath));
+		if (!source.isFile() || !IsWithin(source.canonicalFilePath(), catalogCanonical) ||
+		    source.size() <= 0 ||
+		    source.size() > std::numeric_limits<qint64>::max() - requiredBytes - 1024 * 1024)
+			return Fail(error, QStringLiteral("A matching original MP4 is missing or unsafe"));
+		requiredBytes += source.size();
+	}
+	const QStorageInfo storage(destination);
+	if (!storage.isValid() || !storage.isReady() || storage.bytesAvailable() < requiredBytes + 1024 * 1024)
+		return Fail(error, QStringLiteral("Export destination has insufficient free space"));
 
 	const QString exportId = QUuid::createUuid().toString(QUuid::WithoutBraces).toLower();
 	const QString packageName = QStringLiteral("filmstudy-export-%1").arg(exportId);
@@ -332,7 +368,7 @@ bool Catalog::ExportMatching(const QString &perspective, const QString &topicId,
 		if (!ok)
 			break;
 		const QString sourceCanonical = QFileInfo(asset.sourcePath).canonicalFilePath();
-		if (!sourceCanonical.startsWith(catalogCanonical + QDir::separator())) {
+		if (!IsWithin(sourceCanonical, catalogCanonical)) {
 			ok = Fail(error, QStringLiteral("Original media location escapes catalog"));
 			break;
 		}

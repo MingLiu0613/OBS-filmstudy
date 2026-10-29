@@ -133,6 +133,13 @@ int main(int argc, char *argv[])
 	if (!manifestFile.open(QIODevice::ReadOnly))
 		return 23;
 	const QByteArray frozenBytes = manifestFile.readAll();
+	const QByteArray savedManifestPath = qgetenv("FILMSTUDY_SMOKE_MANIFEST");
+	if (!savedManifestPath.isEmpty()) {
+		QFile savedManifest(QString::fromUtf8(savedManifestPath));
+		if (!savedManifest.open(QIODevice::WriteOnly) ||
+		    savedManifest.write(frozenBytes) != frozenBytes.size())
+			return 28;
+	}
 	const QJsonObject manifest = QJsonDocument::fromJson(frozenBytes).object();
 	const QJsonArray exportedClips = manifest.value("clips").toArray();
 	if (manifest.value("schema_version").toInt() != 2 || manifest.value("clip_count").toInt() != 1 ||

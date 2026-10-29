@@ -2,6 +2,7 @@
 
 import copy
 import json
+import os
 import unittest
 from pathlib import Path
 
@@ -17,6 +18,23 @@ VALIDATOR = Draft202012Validator(SCHEMA, format_checker=FormatChecker())
 
 
 class ManifestSchemaTests(unittest.TestCase):
+    def test_generated_native_export_conforms_when_supplied(self):
+        path = os.environ.get("FILMSTUDY_SMOKE_MANIFEST")
+        if not path:
+            self.skipTest("Native catalog smoke manifest was not supplied")
+        actual = json.loads(Path(path).read_text("utf-8"))
+        VALIDATOR.validate(actual)
+        self.assertEqual(actual["clip_count"], len(actual["clips"]))
+        self.assertEqual(
+            actual["analysis_count"],
+            sum(len(clip["analyses"]) for clip in actual["clips"]),
+        )
+        for clip in actual["clips"]:
+            analyses = {item["analysis_id"]: item for item in clip["analyses"]}
+            self.assertTrue(set(clip["matched_analysis_ids"]) <= analyses.keys())
+            for analysis_id in clip["matched_analysis_ids"]:
+                self.assertEqual(analyses[analysis_id]["status"], "complete")
+
     def test_schema_is_valid_and_prd_example_conforms(self):
         Draft202012Validator.check_schema(SCHEMA)
         VALIDATOR.validate(EXAMPLE)

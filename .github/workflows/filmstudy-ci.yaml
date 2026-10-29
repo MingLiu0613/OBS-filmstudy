@@ -56,7 +56,12 @@ jobs:
         shell: pwsh
         run: |
           cmake --build build_x64 --config RelWithDebInfo --target filmstudy-catalog-smoke
+          $env:FILMSTUDY_SMOKE_MANIFEST = Join-Path $PWD 'build_x64/filmstudy-smoke-manifest.json'
           & build_x64/frontend/filmstudy/RelWithDebInfo/filmstudy-catalog-smoke.exe
+          if ($LASTEXITCODE -ne 0) { throw "Catalog smoke failed: $LASTEXITCODE" }
+          python -m venv build_x64/filmstudy-test-venv
+          & build_x64/filmstudy-test-venv/Scripts/python.exe -m pip install --disable-pip-version-check -r tests/filmstudy/requirements.txt
+          & build_x64/filmstudy-test-venv/Scripts/python.exe tests/filmstudy/test_manifest_schema.py
 
   macos-arm64:
     runs-on: macos-26
@@ -79,6 +84,10 @@ jobs:
         shell: zsh --no-rcs --errexit --pipefail {0}
         run: |
           cmake --build build_macos --config RelWithDebInfo --target filmstudy-catalog-smoke
+          export FILMSTUDY_SMOKE_MANIFEST="$PWD/build_macos/filmstudy-smoke-manifest.json"
           DYLD_FRAMEWORK_PATH="$PWD/.deps/obs-deps-qt6-2026-10-23-universal/lib" \
           DYLD_LIBRARY_PATH="$PWD/.deps/obs-deps-2026-10-23-universal/lib" \
             build_macos/frontend/filmstudy/RelWithDebInfo/filmstudy-catalog-smoke
+          python3 -m venv build_macos/filmstudy-test-venv
+          build_macos/filmstudy-test-venv/bin/python -m pip install --disable-pip-version-check -r tests/filmstudy/requirements.txt
+          build_macos/filmstudy-test-venv/bin/python tests/filmstudy/test_manifest_schema.py

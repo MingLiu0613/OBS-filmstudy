@@ -59,3 +59,15 @@
 - Root cause: The standalone test target inherited OBS's app-relative dependency rpaths without being packaged inside OBS.app.
 - Fix: Set `DYLD_FRAMEWORK_PATH` to the pinned Qt directory and `DYLD_LIBRARY_PATH` to the pinned prebuilt dependency directory for that CI smoke step.
 - Prevention: Treat compiling a test target and executing it as separate checks; give standalone tests every runtime library search path they need.
+
+## LESSON-20261029-export-paths: Normalize canonical paths before containment checks
+
+- Date: 2026-10-29
+- Tags: windows, qt, filesystem, export, ci
+- Applicable scenarios: Comparing a canonical media path with a canonical catalog root on both Windows and macOS.
+- Severity: medium
+- Source: Film Study CI run `40832401606`, Windows x64 catalog smoke.
+- Problem: The native OBS build succeeded but the synthetic export failed with `Original media location escapes catalog` for a file inside the catalog.
+- Root cause: The containment check appended a platform separator to a Qt canonical path without normalizing both path strings; Windows separator spelling caused a false rejection.
+- Fix: Convert both paths to Qt's forward-slash spelling before comparing, and use case-insensitive comparison on Windows.
+- Prevention: Exercise path containment with native tests on every supported OS; a successful build does not verify path semantics.

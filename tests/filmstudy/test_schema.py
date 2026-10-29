@@ -1,6 +1,7 @@
 """Focused executable checks for the Film Study schema contract."""
 
 import sqlite3
+import json
 import unittest
 from pathlib import Path
 
@@ -162,6 +163,67 @@ class SchemaContractTests(unittest.TestCase):
         self.assertEqual(
             self.db.execute("SELECT sha256 FROM media_assets WHERE id='asset-1'").fetchone()[0],
             "a" * 64,
+        )
+
+    def test_frozen_export_rejects_mutation_and_unverified_success(self):
+        seed_ready_clip(self.db)
+        self.db.execute(
+            "INSERT INTO catalog_info(singleton,catalog_id,created_at,updated_at) "
+            "VALUES (1,'catalog-1',?,?)", (NOW, NOW)
+        )
+        self.db.execute(
+            "INSERT INTO topics(id,name,name_key,created_at,updated_at) "
+            "VALUES ('topic-1','Topic','topic',?,?)", (NOW, NOW)
+        )
+        self.db.execute(
+            "INSERT INTO analyses(id,clip_id,reference_asset_id,status,perspective,"
+            "topic_id,assessment,created_at,updated_at) "
+            "VALUES ('analysis-1','clip-1','asset-1','complete','offense',"
+            "'topic-1','positive',?,?)", (NOW, NOW)
+        )
+        self.db.execute(
+            "INSERT INTO export_jobs(id,catalog_id,state,destination_root,package_name,"
+            "staging_name,query_json,snapshot_catalog_revision,created_at,updated_at) "
+            "VALUES ('export-1','catalog-1','preparing','/tmp','package','staging',"
+            "'{}',1,?,?)", (NOW, NOW)
+        )
+        self.db.execute(
+            "INSERT INTO export_items(export_id,clip_id,asset_id,source_location_id,"
+            "snapshot_clip_revision,position,destination_relpath,expected_size_bytes,"
+            "expected_sha256) VALUES ('export-1','clip-1','asset-1','location-1',"
+            "1,0,'media/clip-1.mp4',100,?)", ("a" * 64,)
+        )
+        self.db.execute(
+            "INSERT INTO export_item_matches(export_id,clip_id,analysis_id,"
+            "snapshot_analysis_revision) VALUES ('export-1','clip-1','analysis-1',1)"
+        )
+        frozen = json.dumps({"schema_version": 2, "clip_count": 1,
+                             "analysis_count": 1, "clips": [{"analyses": [{}]}]})
+        self.db.execute(
+            "UPDATE export_jobs SET manifest_snapshot_json=?,clip_count=1,"
+            "analysis_count=1,snapshot_frozen_at=?,state='copying' WHERE id='export-1'",
+            (frozen, NOW)
+        )
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute(
+                "UPDATE export_jobs SET manifest_snapshot_json='{}' WHERE id='export-1'"
+            )
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute(
+                "UPDATE export_jobs SET state='succeeded',completed_at=?,"
+                "manifest_sha256=? WHERE id='export-1'", (NOW, "b" * 64)
+            )
+        self.db.execute(
+            "UPDATE export_items SET copy_state='verified',bytes_copied=100,"
+            "copied_at=? WHERE export_id='export-1' AND clip_id='clip-1'", (NOW,)
+        )
+        self.db.execute(
+            "UPDATE export_jobs SET state='succeeded',completed_at=?,"
+            "manifest_sha256=? WHERE id='export-1'", (NOW, "b" * 64)
+        )
+        self.assertEqual(
+            self.db.execute("SELECT state FROM export_jobs WHERE id='export-1'").fetchone(),
+            ("succeeded",)
         )
 
 
