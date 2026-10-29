@@ -3,6 +3,12 @@
 Feature: 采集、分析和导出篮球素材
   用户在观看比赛时录制片段，停止后再预览和标注，并按一条完整分析查找素材。
 
+  Scenario: 启动后可打开篮球素材工具
+    Given 用户运行 Film Study 版 OBS
+    When OBS 完成启动
+    Then 工具菜单显示 Basketball Film Study
+    And 用户可以打开篮球素材窗口
+
   Scenario: 开始录制时固定素材身份且录制中不干扰观看
     Given 已选择可写的素材库和当前比赛
     When 用户开始录制比赛片段

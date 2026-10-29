@@ -52,6 +52,9 @@ jobs:
       - name: Build without signing or publishing
         shell: pwsh
         run: .github/scripts/Build-Windows.ps1 -Target x64 -Configuration RelWithDebInfo
+      - name: Check Film Study module registration
+        shell: pwsh
+        run: python tests/filmstudy/test_module_registration.py build_x64/install/bin/64bit/obs.dll
       - name: Run catalog bootstrap smoke
         shell: pwsh
         run: |
