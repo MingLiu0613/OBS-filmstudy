@@ -62,6 +62,45 @@ jobs:
           python -m venv build_x64/filmstudy-test-venv
           & build_x64/filmstudy-test-venv/Scripts/python.exe -m pip install --disable-pip-version-check -r tests/filmstudy/requirements.txt
           & build_x64/filmstudy-test-venv/Scripts/python.exe tests/filmstudy/test_manifest_schema.py
+      - name: Package unsigned Windows trial build
+        shell: pwsh
+        run: |
+          Push-Location build_x64
+          try {
+            cpack -C RelWithDebInfo
+            if ($LASTEXITCODE -ne 0) { throw "CPack failed: $LASTEXITCODE" }
+          } finally {
+            Pop-Location
+          }
+          $archive = Get-ChildItem build_x64 -Filter 'obs-studio-*-windows-x64.zip' -File | Select-Object -First 1
+          if (-not $archive) { throw 'Windows trial ZIP was not generated' }
+          Add-Type -AssemblyName System.IO.Compression
+          $zip = [System.IO.Compression.ZipFile]::OpenRead($archive.FullName)
+          try {
+            $names = @($zip.Entries | ForEach-Object { $_.FullName })
+            foreach ($required in @('obs64.exe', 'filmstudy-ui.dll')) {
+              if (-not ($names | Where-Object { $_.EndsWith($required) })) {
+                throw "Trial ZIP is missing $required"
+              }
+            }
+          } finally {
+            $zip.Dispose()
+          }
+          @(
+            "head_sha=${{ github.event.pull_request.head.sha || github.sha }}"
+            "tested_sha=${{ github.sha }}"
+            "runner_arch=$env:PROCESSOR_ARCHITECTURE"
+            "archive=$($archive.Name)"
+          ) | Set-Content -Path build_x64/filmstudy-trial-build.txt -Encoding utf8
+      - name: Upload unsigned Windows trial build
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: filmstudy-windows-x64-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            build_x64/obs-studio-*-windows-x64.zip
+            build_x64/filmstudy-trial-build.txt
+          if-no-files-found: error
+          retention-days: 7
 
   macos-arm64:
     runs-on: macos-26
