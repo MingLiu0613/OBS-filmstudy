@@ -80,4 +80,5 @@ jobs:
         run: |
           cmake --build build_macos --config RelWithDebInfo --target filmstudy-catalog-smoke
           DYLD_FRAMEWORK_PATH="$PWD/.deps/obs-deps-qt6-2026-10-23-universal/lib" \
+          DYLD_LIBRARY_PATH="$PWD/.deps/obs-deps-2026-10-23-universal/lib" \
             build_macos/frontend/filmstudy/RelWithDebInfo/filmstudy-catalog-smoke

@@ -48,14 +48,14 @@
 - Fix: Include `<QLockFile>` in `Catalog.hpp` rather than only forward declaring it.
 - Prevention: Compile a separate consumer translation unit for public headers, not only the implementation file that includes complete types.
 
-## LESSON-20261029-mac-qt-runtime: Give standalone smoke executables a Qt framework path
+## LESSON-20261029-mac-qt-runtime: Give standalone smoke executables dependency paths
 
 - Date: 2026-10-29
 - Tags: macos, qt, ci, runtime
 - Applicable scenarios: Running an unbundled Qt executable built beside OBS.app on macOS CI.
 - Severity: low
-- Source: Film Study CI run `40656776827`.
-- Problem: The smoke executable compiled and linked, but dyld could not load `@rpath/QtCore.framework/Versions/A/QtCore`.
-- Root cause: The standalone test target inherited OBS's app-relative framework rpath without being packaged inside OBS.app.
-- Fix: Set `DYLD_FRAMEWORK_PATH` to the pinned Qt dependency directory for that CI smoke step.
-- Prevention: Treat compiling a test target and executing it as separate checks; give standalone tests their runtime library search paths explicitly.
+- Source: Film Study CI runs `40656776827` and `40801614306`.
+- Problem: The smoke executable compiled and linked, but dyld first could not load QtCore and then could not load `@rpath/libavcodec.dylib`.
+- Root cause: The standalone test target inherited OBS's app-relative dependency rpaths without being packaged inside OBS.app.
+- Fix: Set `DYLD_FRAMEWORK_PATH` to the pinned Qt directory and `DYLD_LIBRARY_PATH` to the pinned prebuilt dependency directory for that CI smoke step.
+- Prevention: Treat compiling a test target and executing it as separate checks; give standalone tests every runtime library search path they need.
