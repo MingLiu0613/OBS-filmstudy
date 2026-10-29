@@ -767,3 +767,34 @@ bool Catalog::SearchComplete(const QString &perspective, const QString &topicId,
 	*matches = found;
 	return true;
 }
+
+bool Catalog::ListReadyClips(QList<ReadyClip> *clips, QString *error)
+{
+	if (!database || !clips)
+		return SetError(error, QStringLiteral("Open a catalog before listing clips"));
+	const char *sql =
+		"SELECT c.id,c.title,coalesce(l.relative_path,''),coalesce(l.availability,'missing'),"
+		"(SELECT count(*) FROM analyses a WHERE a.clip_id=c.id AND a.deleted_at IS NULL) "
+		"FROM clips c LEFT JOIN media_locations l ON l.asset_id=c.primary_asset_id AND l.is_preferred=1 "
+		"WHERE c.capture_state='ready' AND c.deleted_at IS NULL "
+		"ORDER BY c.created_at DESC,c.id";
+	sqlite3_stmt *statement = nullptr;
+	if (sqlite3_prepare_v2(database, sql, -1, &statement, nullptr) != SQLITE_OK)
+		return SetError(error, DbError(database));
+	QList<ReadyClip> found;
+	int step = SQLITE_DONE;
+	while ((step = sqlite3_step(statement)) == SQLITE_ROW) {
+		const auto column = [statement](int index) {
+			const auto *bytes = sqlite3_column_text(statement, index);
+			return bytes ? QString::fromUtf8(reinterpret_cast<const char *>(bytes)) : QString();
+		};
+		found.append({column(0), column(1), column(2), column(3),
+			      sqlite3_column_int(statement, 4)});
+	}
+	const QString detail = step == SQLITE_DONE ? QString() : DbError(database);
+	sqlite3_finalize(statement);
+	if (!detail.isEmpty())
+		return SetError(error, detail);
+	*clips = found;
+	return true;
+}

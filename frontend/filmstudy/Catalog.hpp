@@ -37,6 +37,14 @@ struct ClipMatch {
 	QStringList matchedAnalysisIds;
 };
 
+struct ReadyClip {
+	QString clipId;
+	QString title;
+	QString relativePath;
+	QString availability;
+	int analysisCount = 0;
+};
+
 // Owns one writable SQLite connection and its catalog lock. The catalog cannot
 // be used if the schema is newer or an older migration has not been implemented.
 class Catalog final {
@@ -69,6 +77,7 @@ public:
 			      const QString &note, int expectedRevision, QString *error);
 	bool SearchComplete(const QString &perspective, const QString &topicId,
 			    const QString &assessment, QList<ClipMatch> *matches, QString *error);
+	bool ListReadyClips(QList<ReadyClip> *clips, QString *error);
 	// Freezes the current same-analysis query in SQLite before copying media.
 	// A failed copy keeps the frozen job for inspection and recovery.
 	bool ExportMatching(const QString &perspective, const QString &topicId,

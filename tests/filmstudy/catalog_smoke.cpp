@@ -158,11 +158,24 @@ int main(int argc, char *argv[])
 	if (primary.ExportMatching(QStringLiteral("offense"), defenseTopic, {},
 				   exports.path(), &noPackage, &error) || !noPackage.isEmpty())
 		return 25;
+	FilmStudy::ManualCaptureIds laterCapture;
+	if (!primary.BeginManualCapture(gameId, QStringLiteral("{}"), &laterCapture, &error) ||
+	    !primary.SearchComplete(QStringLiteral("offense"), offenseTopic, {}, &matches, &error) ||
+	    matches.size() != 1 || matches.first().clipId != next.clipId)
+		return 29;
+	QList<FilmStudy::ReadyClip> ready;
+	if (!primary.ListReadyClips(&ready, &error) || ready.size() != 1 ||
+	    ready.first().clipId != next.clipId || ready.first().analysisCount != 2 ||
+	    ready.first().availability != QStringLiteral("available"))
+		return 30;
 	primary.Close();
 	if (!concurrent.Open(temporary.path(), &error) || concurrent.CatalogId() != id) {
 		std::cerr << "reopen failed: " << error.toStdString() << '\n';
 		return 5;
 	}
+	if (!concurrent.ListReadyClips(&ready, &error) || ready.size() != 1 ||
+	    ready.first().clipId != next.clipId)
+		return 31;
 	std::cout << "catalog create, lock, publication, same-analysis query and frozen export passed\n";
 	return 0;
 }

@@ -163,7 +163,8 @@ public:
 
 	void Show()
 	{
-		if (!active.operationId.isEmpty() || obs_frontend_replay_buffer_active())
+		if (!active.operationId.isEmpty() || obs_frontend_recording_active() ||
+		    obs_frontend_replay_buffer_active())
 			return;
 		if (!dialog) {
 			dialog = new QDialog(static_cast<QWidget *>(obs_frontend_get_main_window()));
@@ -179,6 +180,8 @@ public:
 			layout->addWidget(start);
 			addAnalysis = new QPushButton(QStringLiteral("Add analysis to last saved clip"), dialog);
 			layout->addWidget(addAnalysis);
+			selectClip = new QPushButton(QStringLiteral("Select saved clip"), dialog);
+			layout->addWidget(selectClip);
 			openPreview = new QPushButton(QStringLiteral("Preview last saved clip"), dialog);
 			layout->addWidget(openPreview);
 			search = new QPushButton(QStringLiteral("Search analysed clips"), dialog);
@@ -188,12 +191,14 @@ public:
 			connect(choose, &QPushButton::clicked, this, [this] { Configure(); });
 			connect(start, &QPushButton::clicked, this, [this] { Start(); });
 			connect(addAnalysis, &QPushButton::clicked, this, [this] { AddAnalysis(); });
+			connect(selectClip, &QPushButton::clicked, this, [this] { SelectClip(); });
 			connect(openPreview, &QPushButton::clicked, this, [this] { OpenPreview(); });
 			connect(search, &QPushButton::clicked, this, [this] { Search(); });
 			connect(exportButton, &QPushButton::clicked, this, [this] { Export(); });
 		}
 		start->setEnabled(catalog->IsOpen() && active.operationId.isEmpty() && !importThread);
 		addAnalysis->setEnabled(!lastReadyClipId.isEmpty() && active.operationId.isEmpty());
+		selectClip->setEnabled(catalog->IsOpen() && active.operationId.isEmpty());
 		openPreview->setEnabled(!lastReadyClipId.isEmpty() && active.operationId.isEmpty());
 		search->setEnabled(catalog->IsOpen() && active.operationId.isEmpty());
 		exportButton->setEnabled(catalog->IsOpen() && active.operationId.isEmpty());
@@ -256,6 +261,8 @@ private:
 		analysisCount = 0;
 		if (addAnalysis)
 			addAnalysis->setEnabled(false);
+		if (selectClip)
+			selectClip->setEnabled(false);
 		if (openPreview)
 			openPreview->setEnabled(false);
 		if (search)
@@ -269,6 +276,7 @@ private:
 		SetStatus(QStringLiteral("Ready: %1 — %2").arg(directory, game));
 		start->setEnabled(true);
 		search->setEnabled(true);
+		selectClip->setEnabled(true);
 		exportButton->setEnabled(true);
 	}
 
@@ -345,6 +353,8 @@ private:
 		start->setEnabled(false);
 		if (addAnalysis)
 			addAnalysis->setEnabled(false);
+		if (selectClip)
+			selectClip->setEnabled(false);
 		if (openPreview)
 			openPreview->setEnabled(false);
 		if (search)
@@ -429,6 +439,8 @@ private:
 			start->setEnabled(true);
 		if (addAnalysis)
 			addAnalysis->setEnabled(true);
+		if (selectClip)
+			selectClip->setEnabled(true);
 		if (openPreview)
 			openPreview->setEnabled(true);
 		if (search)
@@ -519,6 +531,47 @@ private:
 			lines.isEmpty() ? QStringLiteral("No matching clips.") : lines.join("\n"));
 	}
 
+	void SelectClip()
+	{
+		if (!catalog->IsOpen() || !active.operationId.isEmpty() || importThread ||
+		    obs_frontend_recording_active() || obs_frontend_replay_buffer_active())
+			return;
+		QList<FilmStudy::ReadyClip> clips;
+		QString error;
+		if (!catalog->ListReadyClips(&clips, &error)) {
+			QMessageBox::warning(dialog.data(), QStringLiteral("Saved clips"), error);
+			return;
+		}
+		if (clips.isEmpty()) {
+			QMessageBox::information(dialog.data(), QStringLiteral("Saved clips"),
+						 QStringLiteral("No saved clips are ready yet."));
+			return;
+		}
+		QStringList labels;
+		for (const auto &clip : clips)
+			labels.append(QStringLiteral("%1 — %2 (%3, %4 analyses)")
+					      .arg(clip.clipId, clip.title.isEmpty() ? QStringLiteral("Untitled") : clip.title,
+						   clip.availability)
+					      .arg(clip.analysisCount));
+		bool accepted = false;
+		const QString selected = QInputDialog::getItem(dialog.data(), QStringLiteral("Saved clips"),
+						      QStringLiteral("Clip"), labels, 0, false, &accepted);
+		if (!accepted)
+			return;
+		const int index = labels.indexOf(selected);
+		if (index < 0)
+			return;
+		ClosePreview();
+		const auto &clip = clips[index];
+		lastReadyClipId = clip.clipId;
+		lastReadyRelativePath = clip.relativePath;
+		analysisCount = clip.analysisCount;
+		addAnalysis->setEnabled(true);
+		openPreview->setEnabled(clip.availability == QStringLiteral("available"));
+		SetStatus(QStringLiteral("Selected clip %1: %2 analyses, media %3")
+				  .arg(clip.clipId).arg(analysisCount).arg(clip.availability));
+	}
+
 	void Export()
 	{
 		if (!catalog->IsOpen() || !active.operationId.isEmpty() || importThread ||
@@ -569,7 +622,8 @@ private:
 
 	void AddAnalysis()
 	{
-		if (lastReadyClipId.isEmpty() || !active.operationId.isEmpty())
+		if (lastReadyClipId.isEmpty() || !active.operationId.isEmpty() ||
+		    obs_frontend_recording_active() || obs_frontend_replay_buffer_active())
 			return;
 		bool accepted = false;
 		const QString perspective = QInputDialog::getItem(
@@ -622,6 +676,7 @@ private:
 	QPointer<QLabel> status;
 	QPointer<QPushButton> start;
 	QPointer<QPushButton> addAnalysis;
+	QPointer<QPushButton> selectClip;
 	QPointer<QPushButton> openPreview;
 	QPointer<QPushButton> search;
 	QPointer<QPushButton> exportButton;
