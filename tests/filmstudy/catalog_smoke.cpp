@@ -5,6 +5,9 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonArray>
 #include <QTemporaryDir>
 
 #include <iostream>
@@ -114,11 +117,45 @@ int main(int argc, char *argv[])
 	if (primary.CompleteAnalysis(offenseAnalysis, QStringLiteral("defense"), defenseTopic,
 				     QStringLiteral("negative"), QStringLiteral("Stale write"), 1, &error))
 		return 19;
+	QTemporaryDir exports;
+	if (!exports.isValid())
+		return 20;
+	QString package;
+	if (!primary.ExportMatching(QStringLiteral("offense"), offenseTopic, {},
+				    exports.path(), &package, &error)) {
+		std::cerr << "export failed: " << error.toStdString() << '\n';
+		return 21;
+	}
+	QFile exportedMedia(QDir(package).filePath(QStringLiteral("media/%1.mp4").arg(next.clipId)));
+	if (!exportedMedia.open(QIODevice::ReadOnly) || exportedMedia.readAll() != bytes)
+		return 22;
+	QFile manifestFile(QDir(package).filePath("manifest.json"));
+	if (!manifestFile.open(QIODevice::ReadOnly))
+		return 23;
+	const QByteArray frozenBytes = manifestFile.readAll();
+	const QJsonObject manifest = QJsonDocument::fromJson(frozenBytes).object();
+	const QJsonArray exportedClips = manifest.value("clips").toArray();
+	if (manifest.value("schema_version").toInt() != 2 || manifest.value("clip_count").toInt() != 1 ||
+	    manifest.value("analysis_count").toInt() != 2 || exportedClips.size() != 1 ||
+	    exportedClips.first().toObject().value("matched_analysis_ids").toArray().first().toString() !=
+		    offenseAnalysis ||
+	    exportedClips.first().toObject().value("analyses").toArray().size() != 2)
+		return 24;
+	if (!primary.CompleteAnalysis(offenseAnalysis, QStringLiteral("offense"), offenseTopic,
+				      QStringLiteral("negative"), QStringLiteral("Revised after export"), 2, &error))
+		return 26;
+	manifestFile.seek(0);
+	if (manifestFile.readAll() != frozenBytes)
+		return 27;
+	QString noPackage;
+	if (primary.ExportMatching(QStringLiteral("offense"), defenseTopic, {},
+				   exports.path(), &noPackage, &error) || !noPackage.isEmpty())
+		return 25;
 	primary.Close();
 	if (!concurrent.Open(temporary.path(), &error) || concurrent.CatalogId() != id) {
 		std::cerr << "reopen failed: " << error.toStdString() << '\n';
 		return 5;
 	}
-	std::cout << "catalog create, lock, publication and same-analysis query passed\n";
+	std::cout << "catalog create, lock, publication, same-analysis query and frozen export passed\n";
 	return 0;
 }

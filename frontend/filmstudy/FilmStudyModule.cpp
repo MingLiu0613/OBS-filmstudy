@@ -183,16 +183,20 @@ public:
 			layout->addWidget(openPreview);
 			search = new QPushButton(QStringLiteral("Search analysed clips"), dialog);
 			layout->addWidget(search);
+			exportButton = new QPushButton(QStringLiteral("Export analysed clips"), dialog);
+			layout->addWidget(exportButton);
 			connect(choose, &QPushButton::clicked, this, [this] { Configure(); });
 			connect(start, &QPushButton::clicked, this, [this] { Start(); });
 			connect(addAnalysis, &QPushButton::clicked, this, [this] { AddAnalysis(); });
 			connect(openPreview, &QPushButton::clicked, this, [this] { OpenPreview(); });
 			connect(search, &QPushButton::clicked, this, [this] { Search(); });
+			connect(exportButton, &QPushButton::clicked, this, [this] { Export(); });
 		}
 		start->setEnabled(catalog->IsOpen() && active.operationId.isEmpty() && !importThread);
 		addAnalysis->setEnabled(!lastReadyClipId.isEmpty() && active.operationId.isEmpty());
 		openPreview->setEnabled(!lastReadyClipId.isEmpty() && active.operationId.isEmpty());
 		search->setEnabled(catalog->IsOpen() && active.operationId.isEmpty());
+		exportButton->setEnabled(catalog->IsOpen() && active.operationId.isEmpty());
 		dialog->show();
 		dialog->raise();
 		dialog->activateWindow();
@@ -256,6 +260,8 @@ private:
 			openPreview->setEnabled(false);
 		if (search)
 			search->setEnabled(false);
+		if (exportButton)
+			exportButton->setEnabled(false);
 		if (!catalog->Open(directory, &error) || !catalog->CreateGame(game, &gameId, &error)) {
 			QMessageBox::warning(dialog.data(), QStringLiteral("Film Study catalog"), error);
 			return;
@@ -263,6 +269,7 @@ private:
 		SetStatus(QStringLiteral("Ready: %1 — %2").arg(directory, game));
 		start->setEnabled(true);
 		search->setEnabled(true);
+		exportButton->setEnabled(true);
 	}
 
 	bool RecordingPreflight(QString *error) const
@@ -426,6 +433,8 @@ private:
 			openPreview->setEnabled(true);
 		if (search)
 			search->setEnabled(true);
+		if (exportButton)
+			exportButton->setEnabled(true);
 	}
 
 	void ClosePreview()
@@ -510,6 +519,54 @@ private:
 			lines.isEmpty() ? QStringLiteral("No matching clips.") : lines.join("\n"));
 	}
 
+	void Export()
+	{
+		if (!catalog->IsOpen() || !active.operationId.isEmpty() || importThread ||
+		    obs_frontend_recording_active() || obs_frontend_replay_buffer_active())
+			return;
+		bool accepted = false;
+		const QString perspective = QInputDialog::getItem(
+			dialog.data(), QStringLiteral("Export perspective"), QStringLiteral("Perspective"),
+			{QStringLiteral("any"), QStringLiteral("offense"), QStringLiteral("defense")},
+			0, false, &accepted);
+		if (!accepted)
+			return;
+		const QString topicName = QInputDialog::getText(
+			dialog.data(), QStringLiteral("Export topic"),
+			QStringLiteral("Topic name (blank for any)"), QLineEdit::Normal, {}, &accepted).trimmed();
+		if (!accepted)
+			return;
+		QString topicId;
+		QString error;
+		if (!topicName.isEmpty() && !catalog->FindTopic(topicName, &topicId, &error)) {
+			QMessageBox::warning(dialog.data(), QStringLiteral("Export failed"), error);
+			return;
+		}
+		if (!topicName.isEmpty() && topicId.isEmpty()) {
+			QMessageBox::information(dialog.data(), QStringLiteral("Export"),
+						 QStringLiteral("No analyses use that topic."));
+			return;
+		}
+		const QString destination = QFileDialog::getExistingDirectory(
+			dialog.data(), QStringLiteral("Choose export destination outside the catalog"));
+		if (destination.isEmpty())
+			return;
+		exportButton->setEnabled(false);
+		SetStatus(QStringLiteral("Exporting frozen clips and JSON…"));
+		QString packagePath;
+		const bool ok = catalog->ExportMatching(
+			perspective == QStringLiteral("any") ? QString() : perspective,
+			topicId, {}, destination, &packagePath, &error);
+		exportButton->setEnabled(true);
+		if (!ok) {
+			SetStatus(QStringLiteral("Export failed: %1").arg(error));
+			QMessageBox::warning(dialog.data(), QStringLiteral("Export failed"), error);
+			return;
+		}
+		SetStatus(QStringLiteral("Export saved: %1").arg(packagePath));
+		QMessageBox::information(dialog.data(), QStringLiteral("Export complete"), packagePath);
+	}
+
 	void AddAnalysis()
 	{
 		if (lastReadyClipId.isEmpty() || !active.operationId.isEmpty())
@@ -567,6 +624,7 @@ private:
 	QPointer<QPushButton> addAnalysis;
 	QPointer<QPushButton> openPreview;
 	QPointer<QPushButton> search;
+	QPointer<QPushButton> exportButton;
 	QPointer<FilmStudyPreview> preview;
 	QThread *importThread = nullptr;
 	QString gameId;

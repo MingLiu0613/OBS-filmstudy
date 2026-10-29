@@ -69,6 +69,11 @@ public:
 			      const QString &note, int expectedRevision, QString *error);
 	bool SearchComplete(const QString &perspective, const QString &topicId,
 			    const QString &assessment, QList<ClipMatch> *matches, QString *error);
+	// Freezes the current same-analysis query in SQLite before copying media.
+	// A failed copy keeps the frozen job for inspection and recovery.
+	bool ExportMatching(const QString &perspective, const QString &topicId,
+			    const QString &assessment, const QString &destinationRoot,
+			    QString *packagePath, QString *error);
 	QString IntendedPath(const QString &operationId) const;
 	QString RootDirectory() const { return rootDirectory; }
 
