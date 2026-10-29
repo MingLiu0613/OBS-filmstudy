@@ -660,6 +660,9 @@ bool Catalog::CreateDraftAnalysis(const QString &clipId, QString *analysisId, QS
 	if (ok && sqlite3_changes(database) != 1)
 		ok = SetError(error, QStringLiteral("Clip is not ready for analysis"));
 	if (ok)
+		ok = ExecuteParams("UPDATE clips SET revision=revision+1,updated_at=? WHERE id=?",
+				   {now, clipId}, error);
+	if (ok)
 		ok = ExecuteParams("UPDATE catalog_info SET content_revision=content_revision+1,updated_at=? "
 				   "WHERE singleton=1", {now}, error);
 	if (!ok) {
@@ -676,9 +679,9 @@ bool Catalog::CreateDraftAnalysis(const QString &clipId, QString *analysisId, QS
 
 bool Catalog::CompleteAnalysis(const QString &analysisId, const QString &perspective,
 			       const QString &topicId, const QString &assessment,
-			       const QString &note, QString *error)
+			       const QString &note, int expectedRevision, QString *error)
 {
-	if (!database || analysisId.isEmpty() || topicId.isEmpty() ||
+	if (!database || analysisId.isEmpty() || topicId.isEmpty() || expectedRevision < 1 ||
 	    (perspective != QStringLiteral("offense") && perspective != QStringLiteral("defense")) ||
 	    (assessment != QStringLiteral("positive") && assessment != QStringLiteral("negative")))
 		return SetError(error, QStringLiteral("Complete analysis requires perspective, topic and assessment"));
@@ -687,11 +690,16 @@ bool Catalog::CompleteAnalysis(const QString &analysisId, const QString &perspec
 	const QString now = UtcNow();
 	bool ok = ExecuteParams("UPDATE analyses SET perspective=?,topic_id=?,assessment=?,note=?,"
 				"status='complete',revision=revision+1,updated_at=? "
-				"WHERE id=? AND deleted_at IS NULL AND clip_id IN "
+				"WHERE id=? AND revision=? AND deleted_at IS NULL AND clip_id IN "
 				"(SELECT id FROM clips WHERE capture_state='ready' AND deleted_at IS NULL)",
-				{perspective, topicId, assessment, note, now, analysisId}, error);
+				{perspective, topicId, assessment, note, now, analysisId,
+				 QString::number(expectedRevision)}, error);
 	if (ok && sqlite3_changes(database) != 1)
-		ok = SetError(error, QStringLiteral("Analysis is unavailable or its clip is not ready"));
+		ok = SetError(error, QStringLiteral("Analysis revision changed or its clip is not ready"));
+	if (ok)
+		ok = ExecuteParams("UPDATE clips SET revision=revision+1,updated_at=? "
+				   "WHERE id=(SELECT clip_id FROM analyses WHERE id=?)",
+				   {now, analysisId}, error);
 	if (ok)
 		ok = ExecuteParams("UPDATE catalog_info SET content_revision=content_revision+1,updated_at=? "
 				   "WHERE singleton=1", {now}, error);

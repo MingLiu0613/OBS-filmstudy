@@ -97,9 +97,9 @@ int main(int argc, char *argv[])
 	    !primary.CreateDraftAnalysis(next.clipId, &offenseAnalysis, &error) ||
 	    !primary.CreateDraftAnalysis(next.clipId, &defenseAnalysis, &error) ||
 	    !primary.CompleteAnalysis(offenseAnalysis, QStringLiteral("offense"), offenseTopic,
-				      QStringLiteral("positive"), QStringLiteral("Good contact"), &error) ||
+				      QStringLiteral("positive"), QStringLiteral("Good contact"), 1, &error) ||
 	    !primary.CompleteAnalysis(defenseAnalysis, QStringLiteral("defense"), defenseTopic,
-				      QStringLiteral("negative"), QStringLiteral("Late rotation"), &error)) {
+				      QStringLiteral("negative"), QStringLiteral("Late rotation"), 1, &error)) {
 		std::cerr << "analysis creation failed: " << error.toStdString() << '\n';
 		return 16;
 	}
@@ -111,6 +111,9 @@ int main(int argc, char *argv[])
 	    matches.size() != 1 || matches.first().clipId != next.clipId ||
 	    matches.first().matchedAnalysisIds != QStringList{offenseAnalysis})
 		return 18;
+	if (primary.CompleteAnalysis(offenseAnalysis, QStringLiteral("defense"), defenseTopic,
+				     QStringLiteral("negative"), QStringLiteral("Stale write"), 1, &error))
+		return 19;
 	primary.Close();
 	if (!concurrent.Open(temporary.path(), &error) || concurrent.CatalogId() != id) {
 		std::cerr << "reopen failed: " << error.toStdString() << '\n';

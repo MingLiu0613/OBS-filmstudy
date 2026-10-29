@@ -159,6 +159,10 @@ private:
 			*error = QStringLiteral("Set OBS Recording Format to MP4 before Film Study capture.");
 			return false;
 		}
+		if (config_get_bool(config, "Video", "AutoRemux")) {
+			*error = QStringLiteral("Disable OBS Automatically Remux to MP4 before Film Study capture.");
+			return false;
+		}
 		obs_source_t *scene = obs_frontend_get_current_scene();
 		if (!scene) {
 			*error = QStringLiteral("Select an OBS scene with a capture source first.");
@@ -223,17 +227,15 @@ private:
 		const FilmStudy::ManualCaptureIds capture = active;
 		const QString root = catalog->RootDirectory();
 		const QString relative = catalog->IntendedPath(capture.operationId);
-		QPointer<FilmStudyController> receiver(this);
+		FilmStudyController *receiver = this;
 		importThread = QThread::create([receiver, capture, root, relative, output] {
 			FilmStudy::VerifiedMedia media;
 			QString error;
 			const bool ok = FilmStudy::MediaImporter::Import(output, root, capture.clipId,
 								      relative, &media, &error);
-			if (receiver)
-				QMetaObject::invokeMethod(receiver.data(), [receiver, capture, media, error, ok] {
-					if (receiver)
-						receiver->ImportFinished(capture, media, error, ok);
-				}, Qt::QueuedConnection);
+			QMetaObject::invokeMethod(receiver, [receiver, capture, media, error, ok] {
+				receiver->ImportFinished(capture, media, error, ok);
+			}, Qt::QueuedConnection);
 		});
 		importThread->start();
 	}
@@ -349,7 +351,7 @@ private:
 		QString error;
 		if (!catalog->CreateTopic(topicName, &topicId, &error) ||
 		    !catalog->CreateDraftAnalysis(lastReadyClipId, &analysisId, &error) ||
-		    !catalog->CompleteAnalysis(analysisId, perspective, topicId, assessment, note, &error)) {
+		    !catalog->CompleteAnalysis(analysisId, perspective, topicId, assessment, note, 1, &error)) {
 			QMessageBox::warning(dialog.data(), QStringLiteral("Analysis was not saved"), error);
 			return;
 		}

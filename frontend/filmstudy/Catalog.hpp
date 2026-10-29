@@ -66,7 +66,7 @@ public:
 	bool CreateDraftAnalysis(const QString &clipId, QString *analysisId, QString *error);
 	bool CompleteAnalysis(const QString &analysisId, const QString &perspective,
 			      const QString &topicId, const QString &assessment,
-			      const QString &note, QString *error);
+			      const QString &note, int expectedRevision, QString *error);
 	bool SearchComplete(const QString &perspective, const QString &topicId,
 			    const QString &assessment, QList<ClipMatch> *matches, QString *error);
 	QString IntendedPath(const QString &operationId) const;

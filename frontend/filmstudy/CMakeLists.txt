@@ -13,6 +13,7 @@ find_package(Qt6 REQUIRED COMPONENTS Widgets)
 add_library(filmstudy-ui MODULE FilmStudyModule.cpp)
 target_link_libraries(filmstudy-ui PRIVATE filmstudy-core OBS::libobs OBS::frontend-api Qt::Widgets)
 set_target_properties_obs(filmstudy-ui PROPERTIES FOLDER plugins/filmstudy PREFIX "" AUTOMOC ON)
+target_enable(filmstudy-ui)
 
 add_executable(filmstudy-catalog-smoke ../../tests/filmstudy/catalog_smoke.cpp)
 target_link_libraries(filmstudy-catalog-smoke PRIVATE filmstudy-core)
