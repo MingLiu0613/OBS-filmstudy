@@ -71,3 +71,15 @@
 - Root cause: The containment check appended a platform separator to a Qt canonical path without normalizing both path strings; Windows separator spelling caused a false rejection.
 - Fix: Convert both paths to Qt's forward-slash spelling before comparing, and use case-insensitive comparison on Windows.
 - Prevention: Exercise path containment with native tests on every supported OS; a successful build does not verify path semantics.
+
+## LESSON-20261029-obs-module-registry: Verify the packaged OBS core loader list
+
+- Date: 2026-10-29
+- Tags: obs, cmake, windows, packaging, runtime
+- Applicable scenarios: Adding a built-in OBS module to a source build and producing a portable package.
+- Severity: high
+- Source: First Windows trial package and Film Study CI run `40892652246`.
+- Problem: The first package contained `filmstudy-ui.dll`, but Tools → Basketball Film Study was absent at runtime.
+- Root cause: The plugin target compiled and installed, while the generated OBS core module registry had been written before the Film Study target was registered.
+- Fix: Refresh the core module list after enabling `filmstudy-ui`; add a package-level test that inspects the compiled `obs.dll` registry and rejects a side-loaded plugin copy.
+- Prevention: For a new built-in OBS module, validate both package contents and the generated loader registration, then launch the packaged application. A successful compile or present DLL does not establish runtime loading.
