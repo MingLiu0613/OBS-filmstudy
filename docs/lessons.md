@@ -47,3 +47,15 @@
 - Root cause: The inline default constructor instantiates cleanup for exception paths, so `unique_ptr<QLockFile>` requires the complete `QLockFile` definition in that header.
 - Fix: Include `<QLockFile>` in `Catalog.hpp` rather than only forward declaring it.
 - Prevention: Compile a separate consumer translation unit for public headers, not only the implementation file that includes complete types.
+
+## LESSON-20261029-mac-qt-runtime: Give standalone smoke executables a Qt framework path
+
+- Date: 2026-10-29
+- Tags: macos, qt, ci, runtime
+- Applicable scenarios: Running an unbundled Qt executable built beside OBS.app on macOS CI.
+- Severity: low
+- Source: Film Study CI run `40656776827`.
+- Problem: The smoke executable compiled and linked, but dyld could not load `@rpath/QtCore.framework/Versions/A/QtCore`.
+- Root cause: The standalone test target inherited OBS's app-relative framework rpath without being packaged inside OBS.app.
+- Fix: Set `DYLD_FRAMEWORK_PATH` to the pinned Qt dependency directory for that CI smoke step.
+- Prevention: Treat compiling a test target and executing it as separate checks; give standalone tests their runtime library search paths explicitly.

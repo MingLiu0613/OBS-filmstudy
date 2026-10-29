@@ -45,6 +45,13 @@ int main(int argc, char *argv[])
 		std::cerr << "recording state transition failed: " << error.toStdString() << '\n';
 		return 9;
 	}
+	const QString output = QDir(temporary.path()).filePath("completed.mp4");
+	if (!primary.MarkOutputClosed(capture.operationId, output, &error) ||
+	    !primary.MarkOutputClosed(capture.operationId, output, &error) ||
+	    primary.IntendedPath(capture.operationId) != QStringLiteral("media/%1.mp4").arg(capture.clipId)) {
+		std::cerr << "completed output transition failed: " << error.toStdString() << '\n';
+		return 12;
+	}
 	if (!primary.MarkFailed(capture.operationId, QStringLiteral("output_failed"),
 				QStringLiteral("No completed file"), &error))
 		return 10;

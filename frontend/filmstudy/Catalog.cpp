@@ -5,6 +5,8 @@
 #include <QDateTime>
 #include <QDir>
 #include <QFileInfo>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QLockFile>
 #include <QUuid>
 
@@ -44,6 +46,7 @@ bool Catalog::Open(const QString &rootDirectory, QString *error)
 	if (!rootInfo.exists() && !QDir().mkpath(rootDirectory))
 		return SetError(error, QStringLiteral("Cannot create catalog directory"));
 	const QString root = QDir(rootDirectory).absolutePath();
+	this->rootDirectory = root;
 	lock = std::make_unique<QLockFile>(QDir(root).filePath("catalog.lock"));
 	lock->setStaleLockTime(0);
 	if (!lock->tryLock(0)) {
@@ -85,6 +88,7 @@ void Catalog::Close()
 		database = nullptr;
 	}
 	lock.reset();
+	rootDirectory.clear();
 }
 
 bool Catalog::Exec(const QString &sql, QString *error)
@@ -407,6 +411,146 @@ bool Catalog::MarkFailed(const QString &operationId, const QString &code, const 
 				   "'capture_failed',json_object('code',?),? FROM capture_operations WHERE id=?",
 				   {QUuid::createUuid().toString(QUuid::WithoutBraces).toLower(), code, now,
 				    operationId},
+				   error);
+	if (!ok) {
+		Exec(QStringLiteral("ROLLBACK"), nullptr);
+		return false;
+	}
+	if (!Exec(QStringLiteral("COMMIT"), error)) {
+		Exec(QStringLiteral("ROLLBACK"), nullptr);
+		return false;
+	}
+	return true;
+}
+
+bool Catalog::MarkOutputClosed(const QString &operationId, const QString &absoluteOutputPath, QString *error)
+{
+	if (!database || !QFileInfo(absoluteOutputPath).isAbsolute())
+		return SetError(error, QStringLiteral("An explicit absolute OBS output path is required"));
+	QString phase;
+	bool row = false;
+	if (!QueryBoundValue("SELECT phase FROM capture_operations WHERE id=?", operationId, &phase, &row,
+			     error) || !row)
+		return SetError(error, QStringLiteral("Unknown capture operation"));
+	if (phase == QStringLiteral("processing") || phase == QStringLiteral("ready")) {
+		QString recordedPath;
+		bool found = false;
+		if (!QueryBoundValue("SELECT json_extract(payload_json,'$.output_path') FROM operation_events "
+				     "WHERE operation_id=? AND dedupe_key='output-closed'", operationId,
+				     &recordedPath, &found, error))
+			return false;
+		return found && recordedPath == absoluteOutputPath
+			       ? true
+			       : SetError(error, QStringLiteral("Closed output path differs from recorded operation"));
+	}
+	if (phase != QStringLiteral("saving"))
+		return SetError(error, QStringLiteral("Operation is not saving"));
+	if (!Exec(QStringLiteral("BEGIN IMMEDIATE"), error))
+		return false;
+	const QString now = UtcNow();
+	const QString payload = QString::fromUtf8(
+		QJsonDocument(QJsonObject{{QStringLiteral("output_path"), absoluteOutputPath}})
+			.toJson(QJsonDocument::Compact));
+	bool ok = ExecuteParams("UPDATE capture_operations SET phase='processing',updated_at=? "
+				"WHERE id=? AND phase='saving'",
+				{now, operationId}, error);
+	if (ok && sqlite3_changes(database) != 1)
+		ok = SetError(error, QStringLiteral("Operation state changed before output closed"));
+	if (ok)
+		ok = ExecuteParams("UPDATE capture_sessions SET state='stopped',stopped_at=?,updated_at=? "
+				   "WHERE id=(SELECT session_id FROM capture_operations WHERE id=?)",
+				   {now, now, operationId}, error) &&
+		     ExecuteParams("UPDATE clips SET capture_state='processing',updated_at=? "
+				   "WHERE id=(SELECT clip_id FROM capture_operations WHERE id=?)",
+				   {now, operationId}, error) &&
+		     ExecuteParams("INSERT INTO operation_events(id,session_id,operation_id,dedupe_key,"
+				   "event_type,payload_json,created_at) SELECT ?,session_id,id,'output-closed',"
+				   "'output_closed',?,? FROM capture_operations WHERE id=?",
+				   {QUuid::createUuid().toString(QUuid::WithoutBraces).toLower(), payload, now,
+				    operationId},
+				   error);
+	if (!ok) {
+		Exec(QStringLiteral("ROLLBACK"), nullptr);
+		return false;
+	}
+	if (!Exec(QStringLiteral("COMMIT"), error)) {
+		Exec(QStringLiteral("ROLLBACK"), nullptr);
+		return false;
+	}
+	return true;
+}
+
+QString Catalog::IntendedPath(const QString &operationId) const
+{
+	if (!database)
+		return {};
+	QString value;
+	bool row = false;
+	if (const_cast<Catalog *>(this)->QueryBoundValue(
+		    "SELECT intended_final_relpath FROM capture_operations WHERE id=?", operationId, &value,
+		    &row, nullptr) &&
+	    row)
+		return value;
+	return {};
+}
+
+bool Catalog::PublishOriginal(const QString &operationId, const VerifiedMedia &media, QString *error)
+{
+	if (!database || media.clipId.isEmpty() || media.relativePath != IntendedPath(operationId) ||
+	    media.sizeBytes < 1 || media.durationMs < 1 || media.width < 1 || media.height < 1 ||
+	    media.fpsNum < 1 || media.fpsDen < 1 || media.sha256.size() != 64)
+		return SetError(error, QStringLiteral("Verified media does not match the capture operation"));
+	QString clipId;
+	QString phase;
+	bool row = false;
+	if (!QueryBoundValue("SELECT clip_id FROM capture_operations WHERE id=?", operationId, &clipId, &row,
+			     error) ||
+	    !row || clipId != media.clipId ||
+	    !QueryBoundValue("SELECT phase FROM capture_operations WHERE id=?", operationId, &phase, &row,
+			     error) ||
+	    !row || phase != QStringLiteral("processing"))
+		return SetError(error, QStringLiteral("Operation is not processing this clip"));
+	const QFileInfo file(QDir(rootDirectory).filePath(media.relativePath));
+	if (!file.isFile() || file.size() != media.sizeBytes)
+		return SetError(error, QStringLiteral("Verified media file is unavailable or changed"));
+	if (!Exec(QStringLiteral("BEGIN IMMEDIATE"), error))
+		return false;
+	const QString now = UtcNow();
+	const QString assetId = QUuid::createUuid().toString(QUuid::WithoutBraces).toLower();
+	const QString locationId = QUuid::createUuid().toString(QUuid::WithoutBraces).toLower();
+	bool ok = ExecuteParams(
+		"INSERT INTO media_assets(id,clip_id,asset_kind,container,video_codec,audio_codec,width,height,"
+		"fps_num,fps_den,duration_ms,size_bytes,sha256,created_at) "
+		"VALUES (?1,?2,'original','mp4',?3,NULLIF(?4,''),?5,?6,?7,?8,?9,?10,?11,?12)",
+		{assetId, clipId, media.videoCodec, media.audioCodec, QString::number(media.width),
+		 QString::number(media.height), QString::number(media.fpsNum), QString::number(media.fpsDen),
+		 QString::number(media.durationMs), QString::number(media.sizeBytes), media.sha256, now},
+		error);
+	if (ok)
+		ok = ExecuteParams(
+			"INSERT INTO media_locations(id,asset_id,relative_path,path_key,availability,"
+			"is_preferred,last_verified_at,observed_size_bytes,created_at,updated_at) "
+			"VALUES (?1,?2,?3,?4,'available',1,?5,?6,?7,?8)",
+			{locationId, assetId, media.relativePath, media.relativePath, now,
+			 QString::number(media.sizeBytes), now, now},
+			error);
+	if (ok)
+		ok = ExecuteParams("UPDATE clips SET primary_asset_id=?,capture_state='ready',"
+				   "revision=revision+1,updated_at=? WHERE id=? AND capture_state='processing'",
+				   {assetId, now, clipId}, error);
+	if (ok && sqlite3_changes(database) != 1)
+		ok = SetError(error, QStringLiteral("Clip changed during media publication"));
+	if (ok)
+		ok = ExecuteParams("UPDATE capture_operations SET final_asset_id=?,actual_output_relpath=?,"
+				   "phase='ready',updated_at=? WHERE id=? AND phase='processing'",
+				   {assetId, media.relativePath, now, operationId}, error) &&
+		     ExecuteParams("UPDATE catalog_info SET content_revision=content_revision+1,updated_at=? "
+				   "WHERE singleton=1",
+				   {now}, error) &&
+		     ExecuteParams("INSERT INTO operation_events(id,session_id,operation_id,dedupe_key,"
+				   "event_type,created_at) SELECT ?,session_id,id,'media-published',"
+				   "'media_published',? FROM capture_operations WHERE id=?",
+				   {QUuid::createUuid().toString(QUuid::WithoutBraces).toLower(), now, operationId},
 				   error);
 	if (!ok) {
 		Exec(QStringLiteral("ROLLBACK"), nullptr);
