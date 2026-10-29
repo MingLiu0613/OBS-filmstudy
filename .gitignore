@@ -32,6 +32,22 @@
 !COPYING
 !INSTALL
 !README.rst
+!AGENTS.md
+
+# Film Study source and test assets; keep generated catalogs and media ignored.
+!/tests
+/tests/filmstudy/__pycache__/
+/tests/filmstudy/*.db
+/tests/filmstudy/*.db-wal
+/tests/filmstudy/*.db-shm
+/docs/filmstudy/**/*.mp4
+/docs/filmstudy/**/*.mov
+/frontend/filmstudy/**/*.mp4
+/frontend/filmstudy/**/*.mov
+/frontend/filmstudy/**/*.sqlite3
+/frontend/filmstudy/**/*-wal
+/frontend/filmstudy/**/*-shm
+/frontend/filmstudy/**/catalog.lock
 
 # Exclude lock files
 *.lock.json

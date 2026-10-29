@@ -1,0 +1,135 @@
+name: Film Study build and data checks
+
+on:
+  push:
+    branches:
+      - filmstudy/main
+  pull_request:
+    branches:
+      - filmstudy/main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: filmstudy-${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  data-contract:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Record source and runner
+        run: |
+          echo "ref=${GITHUB_REF} sha=${GITHUB_SHA}"
+          uname -a
+          python3 -c 'import sqlite3; print("SQLite", sqlite3.sqlite_version)'
+      - name: Check Film Study schema
+        run: |
+          python3 tests/filmstudy/test_schema.py
+          python3 frontend/filmstudy/generate_schema_header.py
+          git diff --exit-code -- frontend/filmstudy/SchemaV2.generated.hpp
+      - name: Check export JSON format
+        run: |
+          python3 -m pip install --disable-pip-version-check -r tests/filmstudy/requirements.txt
+          python3 tests/filmstudy/test_manifest_schema.py
+
+  windows-x64:
+    runs-on: windows-2025-vs2026
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          submodules: recursive
+          fetch-depth: 0
+      - name: Record source and native architecture
+        shell: pwsh
+        run: |
+          Write-Output "ref=$env:GITHUB_REF sha=$env:GITHUB_SHA"
+          Write-Output "runner.os=$env:RUNNER_OS native_arch=$env:PROCESSOR_ARCHITECTURE"
+          if ($env:PROCESSOR_ARCHITECTURE -ne 'AMD64') { throw 'Expected native Windows x64 runner' }
+      - name: Build without signing or publishing
+        shell: pwsh
+        run: .github/scripts/Build-Windows.ps1 -Target x64 -Configuration RelWithDebInfo
+      - name: Check Film Study module registration
+        shell: pwsh
+        run: python tests/filmstudy/test_module_registration.py build_x64/install/bin/64bit/obs.dll
+      - name: Run catalog bootstrap smoke
+        shell: pwsh
+        run: |
+          cmake --build build_x64 --config RelWithDebInfo --target filmstudy-catalog-smoke
+          $env:FILMSTUDY_SMOKE_MANIFEST = Join-Path $PWD 'build_x64/filmstudy-smoke-manifest.json'
+          & build_x64/frontend/filmstudy/RelWithDebInfo/filmstudy-catalog-smoke.exe
+          if ($LASTEXITCODE -ne 0) { throw "Catalog smoke failed: $LASTEXITCODE" }
+          python -m venv build_x64/filmstudy-test-venv
+          & build_x64/filmstudy-test-venv/Scripts/python.exe -m pip install --disable-pip-version-check -r tests/filmstudy/requirements.txt
+          & build_x64/filmstudy-test-venv/Scripts/python.exe tests/filmstudy/test_manifest_schema.py
+      - name: Package unsigned Windows trial build
+        shell: pwsh
+        run: |
+          Push-Location build_x64
+          try {
+            cpack -C RelWithDebInfo
+            if ($LASTEXITCODE -ne 0) { throw "CPack failed: $LASTEXITCODE" }
+          } finally {
+            Pop-Location
+          }
+          $archive = Get-ChildItem build_x64 -Filter 'obs-studio-*-windows-x64.zip' -File | Select-Object -First 1
+          if (-not $archive) { throw 'Windows trial ZIP was not generated' }
+          Add-Type -AssemblyName System.IO.Compression
+          $zip = [System.IO.Compression.ZipFile]::OpenRead($archive.FullName)
+          try {
+            $names = @($zip.Entries | ForEach-Object { $_.FullName })
+            foreach ($required in @('obs64.exe', 'filmstudy-ui.dll')) {
+              if (-not ($names | Where-Object { $_.EndsWith($required) })) {
+                throw "Trial ZIP is missing $required"
+              }
+            }
+          } finally {
+            $zip.Dispose()
+          }
+          @(
+            "head_sha=${{ github.event.pull_request.head.sha || github.sha }}"
+            "tested_sha=${{ github.sha }}"
+            "runner_arch=$env:PROCESSOR_ARCHITECTURE"
+            "archive=$($archive.Name)"
+          ) | Set-Content -Path build_x64/filmstudy-trial-build.txt -Encoding utf8
+      - name: Upload unsigned Windows trial build
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: filmstudy-windows-x64-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            build_x64/obs-studio-*-windows-x64.zip
+            build_x64/filmstudy-trial-build.txt
+          if-no-files-found: error
+          retention-days: 7
+
+  macos-arm64:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          submodules: recursive
+          fetch-depth: 0
+      - name: Record source and require native arm64
+        shell: zsh {0}
+        run: |
+          print "ref=${GITHUB_REF} sha=${GITHUB_SHA}"
+          print "runner.os=${RUNNER_OS} native_arch=$(uname -m)"
+          [[ $(uname -m) == arm64 ]] || { print -u2 'Expected native macOS arm64 runner'; exit 1; }
+          sudo xcode-select --switch /Applications/Xcode_26.5.app/Contents/Developer
+      - name: Build without signing or publishing
+        shell: zsh --no-rcs --errexit --pipefail {0}
+        run: .github/scripts/build-macos --config RelWithDebInfo --target macos-arm64
+      - name: Run catalog bootstrap smoke
+        shell: zsh --no-rcs --errexit --pipefail {0}
+        run: |
+          cmake --build build_macos --config RelWithDebInfo --target filmstudy-catalog-smoke
+          export FILMSTUDY_SMOKE_MANIFEST="$PWD/build_macos/filmstudy-smoke-manifest.json"
+          DYLD_FRAMEWORK_PATH="$PWD/.deps/obs-deps-qt6-2026-10-23-universal/lib" \
+          DYLD_LIBRARY_PATH="$PWD/.deps/obs-deps-2026-10-23-universal/lib" \
+            build_macos/frontend/filmstudy/RelWithDebInfo/filmstudy-catalog-smoke
+          python3 -m venv build_macos/filmstudy-test-venv
+          build_macos/filmstudy-test-venv/bin/python -m pip install --disable-pip-version-check -r tests/filmstudy/requirements.txt
+          build_macos/filmstudy-test-venv/bin/python tests/filmstudy/test_manifest_schema.py
