@@ -67,10 +67,12 @@ public:
 		row->addWidget(restart);
 		seek = new QSlider(Qt::Horizontal, this);
 		seek->setRange(0, 1000);
+		seek->setAccessibleName(QStringLiteral("Video position"));
 		row->addWidget(seek, 1);
 		timeLabel = new QLabel(QStringLiteral("0:00 / 0:00"), this);
 		row->addWidget(timeLabel);
 		auto *speed = new QComboBox(this);
+		speed->setAccessibleName(QStringLiteral("Playback speed"));
 		for (const int percent : {50, 100, 150})
 			speed->addItem(QStringLiteral("%1x").arg(percent / 100.0), percent);
 		speed->setCurrentIndex(1);
@@ -78,6 +80,7 @@ public:
 		auto *volume = new QSlider(Qt::Horizontal, this);
 		volume->setRange(0, 100);
 		volume->setValue(100);
+		volume->setAccessibleName(QStringLiteral("Preview volume"));
 		volume->setMaximumWidth(90);
 		row->addWidget(volume);
 		auto *mute = new QPushButton(QStringLiteral("Mute"), this);
