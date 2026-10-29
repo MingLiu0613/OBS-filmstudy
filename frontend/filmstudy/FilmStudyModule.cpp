@@ -1,5 +1,6 @@
 #include "Catalog.hpp"
 #include "MediaImporter.hpp"
+#include "PreviewWidget.hpp"
 
 #include <obs-frontend-api.h>
 #include <obs-module.h>
@@ -7,6 +8,8 @@
 #include <util/config-file.h>
 
 #include <QDialog>
+#include <QDir>
+#include <QComboBox>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QInputDialog>
@@ -14,13 +17,16 @@
 #include <QJsonObject>
 #include <QLabel>
 #include <QLineEdit>
+#include <QHBoxLayout>
 #include <QMessageBox>
 #include <QPointer>
 #include <QPushButton>
+#include <QSlider>
 #include <QThread>
 #include <QTimer>
 #include <QVBoxLayout>
 
+#include <algorithm>
 #include <memory>
 
 OBS_DECLARE_MODULE()
@@ -33,6 +39,112 @@ QString TakeObsString(char *value)
 	return result;
 }
 
+class FilmStudyPreview final : public QDialog {
+public:
+	FilmStudyPreview(const QString &path, const QString &clipId, QWidget *parent) : QDialog(parent)
+	{
+		setWindowTitle(QStringLiteral("Film Study preview — %1").arg(clipId));
+		obs_data_t *settings = obs_data_create();
+		obs_data_set_bool(settings, "is_local_file", true);
+		obs_data_set_string(settings, "local_file", path.toUtf8().constData());
+		obs_data_set_bool(settings, "looping", true);
+		obs_data_set_int(settings, "speed_percent", 100);
+		const QByteArray sourceName = QStringLiteral("Film Study preview %1").arg(clipId).toUtf8();
+		source = obs_source_create("ffmpeg_source", sourceName.constData(), settings, nullptr);
+		obs_data_release(settings);
+		if (!source)
+			return;
+		obs_source_set_monitoring_enabled(source, true);
+		obs_source_inc_showing(source);
+		auto *layout = new QVBoxLayout(this);
+		video = new PreviewWidget(this);
+		video->SetSource(source);
+		layout->addWidget(video);
+		auto *row = new QHBoxLayout;
+		auto *play = new QPushButton(QStringLiteral("Pause"), this);
+		row->addWidget(play);
+		auto *restart = new QPushButton(QStringLiteral("Restart"), this);
+		row->addWidget(restart);
+		seek = new QSlider(Qt::Horizontal, this);
+		seek->setRange(0, 1000);
+		row->addWidget(seek, 1);
+		timeLabel = new QLabel(QStringLiteral("0:00 / 0:00"), this);
+		row->addWidget(timeLabel);
+		auto *speed = new QComboBox(this);
+		for (const int percent : {50, 100, 150})
+			speed->addItem(QStringLiteral("%1x").arg(percent / 100.0), percent);
+		speed->setCurrentIndex(1);
+		row->addWidget(speed);
+		auto *volume = new QSlider(Qt::Horizontal, this);
+		volume->setRange(0, 100);
+		volume->setValue(100);
+		volume->setMaximumWidth(90);
+		row->addWidget(volume);
+		auto *mute = new QPushButton(QStringLiteral("Mute"), this);
+		row->addWidget(mute);
+		layout->addLayout(row);
+		connect(play, &QPushButton::clicked, this, [this, play] {
+			paused = !paused;
+			obs_source_media_play_pause(source, paused);
+			play->setText(paused ? QStringLiteral("Play") : QStringLiteral("Pause"));
+		});
+		connect(restart, &QPushButton::clicked, this, [this] { obs_source_media_restart(source); });
+		connect(seek, &QSlider::sliderReleased, this, [this] {
+			const qint64 duration = obs_source_media_get_duration(source);
+			if (duration > 0)
+				obs_source_media_set_time(source, duration * seek->value() / 1000);
+		});
+		connect(speed, &QComboBox::currentIndexChanged, this, [this, speed](int) {
+			obs_data_t *updated = obs_source_get_settings(source);
+			obs_data_set_int(updated, "speed_percent", speed->currentData().toInt());
+			obs_source_update(source, updated);
+			obs_data_release(updated);
+		});
+		connect(volume, &QSlider::valueChanged, this, [this](int value) {
+			obs_source_set_volume(source, float(value) / 100.0f);
+		});
+		connect(mute, &QPushButton::clicked, this, [this, mute] {
+			const bool muted = !obs_source_muted(source);
+			obs_source_set_muted(source, muted);
+			mute->setText(muted ? QStringLiteral("Unmute") : QStringLiteral("Mute"));
+		});
+		connect(&ticker, &QTimer::timeout, this, [this] {
+			const qint64 duration = obs_source_media_get_duration(source);
+			const qint64 position = obs_source_media_get_time(source);
+			if (duration > 0 && !seek->isSliderDown())
+				seek->setValue(int(position * 1000 / duration));
+			const auto clock = [](qint64 ms) {
+				const qint64 seconds = std::max<qint64>(0, ms / 1000);
+				return QStringLiteral("%1:%2").arg(seconds / 60).arg(seconds % 60, 2, 10, QLatin1Char('0'));
+			};
+			timeLabel->setText(QStringLiteral("%1 / %2").arg(clock(position), clock(duration)));
+		});
+		ticker.start(200);
+	}
+
+	~FilmStudyPreview() override
+	{
+		ticker.stop();
+		if (video)
+			video->SetSource(nullptr);
+		if (source) {
+			obs_source_media_stop(source);
+			obs_source_dec_showing(source);
+			obs_source_release(source);
+		}
+	}
+
+	bool IsReady() const { return source != nullptr; }
+
+private:
+	obs_source_t *source = nullptr;
+	PreviewWidget *video = nullptr;
+	QSlider *seek = nullptr;
+	QLabel *timeLabel = nullptr;
+	QTimer ticker;
+	bool paused = false;
+};
+
 class FilmStudyController final : public QObject {
 public:
 	FilmStudyController() : catalog(std::make_unique<FilmStudy::Catalog>()) {}
@@ -42,12 +154,13 @@ public:
 			importThread->wait();
 			delete importThread;
 		}
+		delete preview.data();
 		delete dialog.data();
 	}
 
 	void Show()
 	{
-		if (!active.operationId.isEmpty())
+		if (!active.operationId.isEmpty() || obs_frontend_replay_buffer_active())
 			return;
 		if (!dialog) {
 			dialog = new QDialog(static_cast<QWidget *>(obs_frontend_get_main_window()));
@@ -63,15 +176,19 @@ public:
 			layout->addWidget(start);
 			addAnalysis = new QPushButton(QStringLiteral("Add analysis to last saved clip"), dialog);
 			layout->addWidget(addAnalysis);
+			openPreview = new QPushButton(QStringLiteral("Preview last saved clip"), dialog);
+			layout->addWidget(openPreview);
 			search = new QPushButton(QStringLiteral("Search analysed clips"), dialog);
 			layout->addWidget(search);
 			connect(choose, &QPushButton::clicked, this, [this] { Configure(); });
 			connect(start, &QPushButton::clicked, this, [this] { Start(); });
 			connect(addAnalysis, &QPushButton::clicked, this, [this] { AddAnalysis(); });
+			connect(openPreview, &QPushButton::clicked, this, [this] { OpenPreview(); });
 			connect(search, &QPushButton::clicked, this, [this] { Search(); });
 		}
 		start->setEnabled(catalog->IsOpen() && active.operationId.isEmpty() && !importThread);
 		addAnalysis->setEnabled(!lastReadyClipId.isEmpty() && active.operationId.isEmpty());
+		openPreview->setEnabled(!lastReadyClipId.isEmpty() && active.operationId.isEmpty());
 		search->setEnabled(catalog->IsOpen() && active.operationId.isEmpty());
 		dialog->show();
 		dialog->raise();
@@ -80,6 +197,12 @@ public:
 
 	void OnEvent(obs_frontend_event event)
 	{
+		if (event == OBS_FRONTEND_EVENT_RECORDING_STARTING ||
+		    event == OBS_FRONTEND_EVENT_REPLAY_BUFFER_STARTING) {
+			ClosePreview();
+			if (dialog)
+				dialog->hide();
+		}
 		if (active.operationId.isEmpty())
 			return;
 		QString error;
@@ -102,7 +225,6 @@ private:
 	{
 		if (status)
 			status->setText(message);
-		blog(LOG_INFO, "Film Study: %s", message.toUtf8().constData());
 	}
 
 	void Configure()
@@ -121,10 +243,14 @@ private:
 		QString error;
 		gameId.clear();
 		start->setEnabled(false);
+		ClosePreview();
 		lastReadyClipId.clear();
+		lastReadyRelativePath.clear();
 		analysisCount = 0;
 		if (addAnalysis)
 			addAnalysis->setEnabled(false);
+		if (openPreview)
+			openPreview->setEnabled(false);
 		if (search)
 			search->setEnabled(false);
 		if (!catalog->Open(directory, &error) || !catalog->CreateGame(game, &gameId, &error)) {
@@ -138,8 +264,9 @@ private:
 
 	bool RecordingPreflight(QString *error) const
 	{
-		if (!catalog->IsOpen() || gameId.isEmpty() || obs_frontend_recording_active()) {
-			*error = QStringLiteral("Choose a catalog and stop any active OBS recording first.");
+		if (!catalog->IsOpen() || gameId.isEmpty() || obs_frontend_recording_active() ||
+		    obs_frontend_replay_buffer_active()) {
+			*error = QStringLiteral("Choose a catalog and stop active OBS recording or replay first.");
 			return false;
 		}
 		config_t *config = obs_frontend_get_profile_config();
@@ -163,12 +290,27 @@ private:
 			*error = QStringLiteral("Disable OBS Automatically Remux to MP4 before Film Study capture.");
 			return false;
 		}
+		const QString outputDirectory = TakeObsString(obs_frontend_get_current_record_output_path());
+		if (outputDirectory.isEmpty() || !QDir(outputDirectory).exists()) {
+			*error = QStringLiteral("Select an existing OBS recording output directory first.");
+			return false;
+		}
 		obs_source_t *scene = obs_frontend_get_current_scene();
 		if (!scene) {
 			*error = QStringLiteral("Select an OBS scene with a capture source first.");
 			return false;
 		}
+		bool hasSource = false;
+		if (obs_scene_t *sceneData = obs_scene_from_source(scene))
+			obs_scene_enum_items(sceneData, [](obs_scene_t *, obs_sceneitem_t *, void *data) {
+				*static_cast<bool *>(data) = true;
+				return false;
+			}, &hasSource);
 		obs_source_release(scene);
+		if (!hasSource) {
+			*error = QStringLiteral("Add a capture source to the selected OBS scene first.");
+			return false;
+		}
 		return true;
 	}
 
@@ -179,6 +321,7 @@ private:
 			QMessageBox::warning(dialog.data(), QStringLiteral("Film Study recording"), error);
 			return;
 		}
+		ClosePreview();
 		obs_source_t *scene = obs_frontend_get_current_scene();
 		const QString sceneName = QString::fromUtf8(obs_source_get_name(scene));
 		obs_source_release(scene);
@@ -192,6 +335,8 @@ private:
 		start->setEnabled(false);
 		if (addAnalysis)
 			addAnalysis->setEnabled(false);
+		if (openPreview)
+			openPreview->setEnabled(false);
 		if (search)
 			search->setEnabled(false);
 		SetStatus(QStringLiteral("Recording clip %1").arg(active.clipId));
@@ -267,14 +412,54 @@ private:
 		}
 		SetStatus(QStringLiteral("Saved clip %1. Open Film Study to continue.").arg(capture.clipId));
 		lastReadyClipId = capture.clipId;
+		lastReadyRelativePath = media.relativePath;
 		analysisCount = 0;
 		active = {};
 		if (start)
 			start->setEnabled(true);
 		if (addAnalysis)
 			addAnalysis->setEnabled(true);
+		if (openPreview)
+			openPreview->setEnabled(true);
 		if (search)
 			search->setEnabled(true);
+	}
+
+	void ClosePreview()
+	{
+		delete preview.data();
+		preview = nullptr;
+	}
+
+	void OpenPreview()
+	{
+		if (lastReadyClipId.isEmpty() || !active.operationId.isEmpty())
+			return;
+		if (obs_frontend_replay_buffer_active() || obs_frontend_recording_active()) {
+			QMessageBox::warning(dialog.data(), QStringLiteral("Preview unavailable"),
+					     QStringLiteral("Stop OBS recording or replay buffering first."));
+			return;
+		}
+		if (preview) {
+			preview->show();
+			preview->raise();
+			return;
+		}
+		const QString path = QDir(catalog->RootDirectory()).filePath(lastReadyRelativePath);
+		if (!QFileInfo(path).isFile()) {
+			QMessageBox::warning(dialog.data(), QStringLiteral("Preview unavailable"),
+					     QStringLiteral("The saved MP4 is missing; relink it before preview."));
+			return;
+		}
+		preview = new FilmStudyPreview(path, lastReadyClipId, dialog.data());
+		if (!preview->IsReady()) {
+			ClosePreview();
+			QMessageBox::warning(dialog.data(), QStringLiteral("Preview unavailable"),
+					     QStringLiteral("OBS could not create the media preview source."));
+			return;
+		}
+		preview->setAttribute(Qt::WA_DeleteOnClose);
+		preview->show();
 	}
 
 	void Search()
@@ -377,11 +562,14 @@ private:
 	QPointer<QLabel> status;
 	QPointer<QPushButton> start;
 	QPointer<QPushButton> addAnalysis;
+	QPointer<QPushButton> openPreview;
 	QPointer<QPushButton> search;
+	QPointer<FilmStudyPreview> preview;
 	QThread *importThread = nullptr;
 	QString gameId;
 	QString previousOutput;
 	QString lastReadyClipId;
+	QString lastReadyRelativePath;
 	int analysisCount = 0;
 	FilmStudy::ManualCaptureIds active;
 };
@@ -396,11 +584,16 @@ void OpenFilmStudy(void *)
 
 void OnFrontendEvent(obs_frontend_event event, void *)
 {
-	if (controller)
-		QMetaObject::invokeMethod(controller, [event] {
-			if (controller)
-				controller->OnEvent(event);
-		}, Qt::QueuedConnection);
+	if (!controller)
+		return;
+	if (QThread::currentThread() == controller->thread()) {
+		controller->OnEvent(event);
+		return;
+	}
+	QMetaObject::invokeMethod(controller, [event] {
+		if (controller)
+			controller->OnEvent(event);
+	}, Qt::QueuedConnection);
 }
 } // namespace
 

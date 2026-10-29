@@ -10,7 +10,7 @@ target_include_directories(filmstudy-core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 set_target_properties(filmstudy-core PROPERTIES FOLDER frontend POSITION_INDEPENDENT_CODE ON)
 
 find_package(Qt6 REQUIRED COMPONENTS Widgets)
-add_library(filmstudy-ui MODULE FilmStudyModule.cpp)
+add_library(filmstudy-ui MODULE FilmStudyModule.cpp PreviewWidget.cpp PreviewWidget.hpp)
 target_link_libraries(filmstudy-ui PRIVATE filmstudy-core OBS::libobs OBS::frontend-api Qt::Widgets)
 set_target_properties_obs(filmstudy-ui PROPERTIES FOLDER plugins/filmstudy PREFIX "" AUTOMOC ON)
 target_enable(filmstudy-ui)
