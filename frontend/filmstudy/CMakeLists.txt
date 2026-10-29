@@ -9,6 +9,11 @@ target_link_libraries(filmstudy-core PUBLIC Qt::Core PRIVATE filmstudy-sqlite FF
 target_include_directories(filmstudy-core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 set_target_properties(filmstudy-core PROPERTIES FOLDER frontend POSITION_INDEPENDENT_CODE ON)
 
+find_package(Qt6 REQUIRED COMPONENTS Widgets)
+add_library(filmstudy-ui MODULE FilmStudyModule.cpp)
+target_link_libraries(filmstudy-ui PRIVATE filmstudy-core OBS::libobs OBS::frontend-api Qt::Widgets)
+set_target_properties_obs(filmstudy-ui PROPERTIES FOLDER plugins/filmstudy PREFIX "" AUTOMOC ON)
+
 add_executable(filmstudy-catalog-smoke ../../tests/filmstudy/catalog_smoke.cpp)
 target_link_libraries(filmstudy-catalog-smoke PRIVATE filmstudy-core)
 set_target_properties(filmstudy-catalog-smoke PROPERTIES FOLDER frontend)

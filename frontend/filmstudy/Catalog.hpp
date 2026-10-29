@@ -3,6 +3,7 @@
 #include <QString>
 #include <QStringList>
 #include <QLockFile>
+#include <QList>
 
 #include <memory>
 
@@ -30,6 +31,12 @@ struct VerifiedMedia {
 	qint64 sizeBytes = 0;
 };
 
+struct ClipMatch {
+	QString clipId;
+	QString relativePath;
+	QStringList matchedAnalysisIds;
+};
+
 // Owns one writable SQLite connection and its catalog lock. The catalog cannot
 // be used if the schema is newer or an older migration has not been implemented.
 class Catalog final {
@@ -50,8 +57,18 @@ public:
 	bool RequestStop(const QString &operationId, QString *error);
 	bool MarkFailed(const QString &operationId, const QString &code, const QString &message,
 			QString *error);
+	bool MarkRecoveryRequired(const QString &operationId, const QString &code,
+				  const QString &message, QString *error);
 	bool MarkOutputClosed(const QString &operationId, const QString &absoluteOutputPath, QString *error);
 	bool PublishOriginal(const QString &operationId, const VerifiedMedia &media, QString *error);
+	bool CreateTopic(const QString &name, QString *topicId, QString *error);
+	bool FindTopic(const QString &name, QString *topicId, QString *error);
+	bool CreateDraftAnalysis(const QString &clipId, QString *analysisId, QString *error);
+	bool CompleteAnalysis(const QString &analysisId, const QString &perspective,
+			      const QString &topicId, const QString &assessment,
+			      const QString &note, QString *error);
+	bool SearchComplete(const QString &perspective, const QString &topicId,
+			    const QString &assessment, QList<ClipMatch> *matches, QString *error);
 	QString IntendedPath(const QString &operationId) const;
 	QString RootDirectory() const { return rootDirectory; }
 

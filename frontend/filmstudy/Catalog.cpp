@@ -423,6 +423,42 @@ bool Catalog::MarkFailed(const QString &operationId, const QString &code, const 
 	return true;
 }
 
+bool Catalog::MarkRecoveryRequired(const QString &operationId, const QString &code,
+				   const QString &message, QString *error)
+{
+	if (!database || code.isEmpty())
+		return SetError(error, QStringLiteral("Open a catalog and provide a recovery code"));
+	if (!Exec(QStringLiteral("BEGIN IMMEDIATE"), error))
+		return false;
+	const QString now = UtcNow();
+	bool ok = ExecuteParams("UPDATE capture_operations SET phase='recovery_required',error_code=?,"
+				"error_message=?,updated_at=? WHERE id=? AND phase='processing'",
+				{code, message, now, operationId}, error);
+	if (ok && sqlite3_changes(database) != 1)
+		ok = SetError(error, QStringLiteral("Operation is not awaiting media publication"));
+	if (ok)
+		ok = ExecuteParams("UPDATE capture_sessions SET state='recovery_required',updated_at=? "
+				   "WHERE id=(SELECT session_id FROM capture_operations WHERE id=?)",
+				   {now, operationId}, error) &&
+		     ExecuteParams("UPDATE clips SET capture_state='recovery_required',updated_at=? "
+				   "WHERE id=(SELECT clip_id FROM capture_operations WHERE id=?)",
+				   {now, operationId}, error) &&
+		     ExecuteParams("INSERT INTO operation_events(id,session_id,operation_id,dedupe_key,"
+				   "event_type,payload_json,created_at) SELECT ?,session_id,id,'recovery-required',"
+				   "'recovery_required',json_object('code',?),? FROM capture_operations WHERE id=?",
+				   {QUuid::createUuid().toString(QUuid::WithoutBraces).toLower(), code, now,
+				    operationId}, error);
+	if (!ok) {
+		Exec(QStringLiteral("ROLLBACK"), nullptr);
+		return false;
+	}
+	if (!Exec(QStringLiteral("COMMIT"), error)) {
+		Exec(QStringLiteral("ROLLBACK"), nullptr);
+		return false;
+	}
+	return true;
+}
+
 bool Catalog::MarkOutputClosed(const QString &operationId, const QString &absoluteOutputPath, QString *error)
 {
 	if (!database || !QFileInfo(absoluteOutputPath).isAbsolute())
@@ -560,5 +596,166 @@ bool Catalog::PublishOriginal(const QString &operationId, const VerifiedMedia &m
 		Exec(QStringLiteral("ROLLBACK"), nullptr);
 		return false;
 	}
+	return true;
+}
+
+bool Catalog::CreateTopic(const QString &name, QString *topicId, QString *error)
+{
+	const QString label = name.trimmed().normalized(QString::NormalizationForm_C);
+	if (!database || label.isEmpty() || !topicId)
+		return SetError(error, QStringLiteral("Open a catalog and provide a topic name"));
+	QString existingId;
+	bool existing = false;
+	if (!QueryBoundValue("SELECT id FROM topics WHERE name_key=? AND is_active=1",
+			     label.toCaseFolded(), &existingId, &existing, error))
+		return false;
+	if (existing) {
+		*topicId = existingId;
+		return true;
+	}
+	const QString id = QUuid::createUuid().toString(QUuid::WithoutBraces).toLower();
+	const QString now = UtcNow();
+	if (!Exec(QStringLiteral("BEGIN IMMEDIATE"), error))
+		return false;
+	const bool ok = ExecuteParams("INSERT INTO topics(id,name,name_key,created_at,updated_at) "
+				      "VALUES (?,?,?,?,?)",
+				      {id, label, label.toCaseFolded(), now, now}, error) &&
+			ExecuteParams("UPDATE catalog_info SET content_revision=content_revision+1,updated_at=? "
+				      "WHERE singleton=1", {now}, error);
+	if (!ok) {
+		Exec(QStringLiteral("ROLLBACK"), nullptr);
+		return false;
+	}
+	if (!Exec(QStringLiteral("COMMIT"), error)) {
+		Exec(QStringLiteral("ROLLBACK"), nullptr);
+		return false;
+	}
+	*topicId = id;
+	return true;
+}
+
+bool Catalog::FindTopic(const QString &name, QString *topicId, QString *error)
+{
+	if (!database || !topicId)
+		return SetError(error, QStringLiteral("Open a catalog before looking up a topic"));
+	bool found = false;
+	topicId->clear();
+	return QueryBoundValue("SELECT id FROM topics WHERE name_key=? AND is_active=1",
+			       name.trimmed().normalized(QString::NormalizationForm_C).toCaseFolded(),
+			       topicId, &found, error);
+}
+
+bool Catalog::CreateDraftAnalysis(const QString &clipId, QString *analysisId, QString *error)
+{
+	if (!database || clipId.isEmpty() || !analysisId)
+		return SetError(error, QStringLiteral("Open a catalog and select a ready clip"));
+	const QString id = QUuid::createUuid().toString(QUuid::WithoutBraces).toLower();
+	const QString now = UtcNow();
+	if (!Exec(QStringLiteral("BEGIN IMMEDIATE"), error))
+		return false;
+	bool ok = ExecuteParams("INSERT INTO analyses(id,clip_id,reference_asset_id,created_at,updated_at) "
+				"SELECT ?,id,primary_asset_id,?,? FROM clips "
+				"WHERE id=? AND capture_state='ready' AND deleted_at IS NULL",
+				{id, now, now, clipId}, error);
+	if (ok && sqlite3_changes(database) != 1)
+		ok = SetError(error, QStringLiteral("Clip is not ready for analysis"));
+	if (ok)
+		ok = ExecuteParams("UPDATE catalog_info SET content_revision=content_revision+1,updated_at=? "
+				   "WHERE singleton=1", {now}, error);
+	if (!ok) {
+		Exec(QStringLiteral("ROLLBACK"), nullptr);
+		return false;
+	}
+	if (!Exec(QStringLiteral("COMMIT"), error)) {
+		Exec(QStringLiteral("ROLLBACK"), nullptr);
+		return false;
+	}
+	*analysisId = id;
+	return true;
+}
+
+bool Catalog::CompleteAnalysis(const QString &analysisId, const QString &perspective,
+			       const QString &topicId, const QString &assessment,
+			       const QString &note, QString *error)
+{
+	if (!database || analysisId.isEmpty() || topicId.isEmpty() ||
+	    (perspective != QStringLiteral("offense") && perspective != QStringLiteral("defense")) ||
+	    (assessment != QStringLiteral("positive") && assessment != QStringLiteral("negative")))
+		return SetError(error, QStringLiteral("Complete analysis requires perspective, topic and assessment"));
+	if (!Exec(QStringLiteral("BEGIN IMMEDIATE"), error))
+		return false;
+	const QString now = UtcNow();
+	bool ok = ExecuteParams("UPDATE analyses SET perspective=?,topic_id=?,assessment=?,note=?,"
+				"status='complete',revision=revision+1,updated_at=? "
+				"WHERE id=? AND deleted_at IS NULL AND clip_id IN "
+				"(SELECT id FROM clips WHERE capture_state='ready' AND deleted_at IS NULL)",
+				{perspective, topicId, assessment, note, now, analysisId}, error);
+	if (ok && sqlite3_changes(database) != 1)
+		ok = SetError(error, QStringLiteral("Analysis is unavailable or its clip is not ready"));
+	if (ok)
+		ok = ExecuteParams("UPDATE catalog_info SET content_revision=content_revision+1,updated_at=? "
+				   "WHERE singleton=1", {now}, error);
+	if (!ok) {
+		Exec(QStringLiteral("ROLLBACK"), nullptr);
+		return false;
+	}
+	if (!Exec(QStringLiteral("COMMIT"), error)) {
+		Exec(QStringLiteral("ROLLBACK"), nullptr);
+		return false;
+	}
+	return true;
+}
+
+bool Catalog::SearchComplete(const QString &perspective, const QString &topicId,
+			     const QString &assessment, QList<ClipMatch> *matches, QString *error)
+{
+	if (!database || !matches)
+		return SetError(error, QStringLiteral("Open a catalog before searching"));
+	const char *sql = "SELECT v.clip_id,a.id,v.relative_path FROM v_clip_primary_media v "
+			  "JOIN analyses a ON a.clip_id=v.clip_id AND a.reference_asset_id=v.asset_id "
+			  "WHERE v.capture_state='ready' AND v.availability='available' "
+			  "AND a.deleted_at IS NULL AND a.status='complete' "
+			  "AND (?1 IS NULL OR a.perspective=?1) "
+			  "AND (?2 IS NULL OR a.topic_id=?2) "
+			  "AND (?3 IS NULL OR a.assessment=?3) "
+			  "ORDER BY v.created_at DESC,v.clip_id,a.created_at,a.id";
+	sqlite3_stmt *statement = nullptr;
+	if (sqlite3_prepare_v2(database, sql, -1, &statement, nullptr) != SQLITE_OK)
+		return SetError(error, DbError(database));
+	const QStringList filters{perspective, topicId, assessment};
+	for (int index = 0; index < filters.size(); ++index) {
+		const QByteArray bytes = filters[index].toUtf8();
+		if (bytes.size() > std::numeric_limits<int>::max()) {
+			sqlite3_finalize(statement);
+			return SetError(error, QStringLiteral("Search filter is too large"));
+		}
+		const int result = filters[index].isEmpty()
+				   ? sqlite3_bind_null(statement, index + 1)
+				   : sqlite3_bind_text(statement, index + 1, bytes.constData(),
+						       static_cast<int>(bytes.size()),
+						       SQLITE_TRANSIENT);
+		if (result != SQLITE_OK) {
+			const QString detail = DbError(database);
+			sqlite3_finalize(statement);
+			return SetError(error, detail);
+		}
+	}
+	QList<ClipMatch> found;
+	int step = SQLITE_ROW;
+	while ((step = sqlite3_step(statement)) == SQLITE_ROW) {
+		const auto column = [statement](int index) {
+			const auto *bytes = sqlite3_column_text(statement, index);
+			return bytes ? QString::fromUtf8(reinterpret_cast<const char *>(bytes)) : QString();
+		};
+		const QString clipId = column(0);
+		if (found.isEmpty() || found.last().clipId != clipId)
+			found.append({clipId, column(2), {}});
+		found.last().matchedAnalysisIds.append(column(1));
+	}
+	const QString detail = step == SQLITE_DONE ? QString() : DbError(database);
+	sqlite3_finalize(statement);
+	if (!detail.isEmpty())
+		return SetError(error, detail);
+	*matches = found;
 	return true;
 }
